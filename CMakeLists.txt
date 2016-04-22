@@ -24,6 +24,12 @@ else (LIBEVENT2_FOUND)
   add_definitions("-DEVENT_V1=1")
 endif (LIBEVENT2_FOUND)
 
+include (CheckIncludeFiles)
+check_include_files (execinfo.h HAVE_EXECINFO_H)
+if (HAVE_EXECINFO_H) 
+  add_definitions("-DHAVE_EXECINFO_H=1")
+endif (HAVE_EXECINFO_H)
+
 set (CMAKE_C_FLAGS "-fno-strict-aliasing -fwrapv -Wall -Wextra -W -Wno-unused-parameter -Wno-deprecated-declarations -Wconversion -Wno-sign-conversion -Wno-sign-compare -fno-omit-frame-pointer")
 set (CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations -Wconversion -Wno-sign-conversion -std=c++14 -fno-omit-frame-pointer")
 set (CMAKE_C_FLAGS_RELEASE "-flto -O3")

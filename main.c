@@ -17,12 +17,6 @@
     Copyright Vitaly Valtman 2013-2015
 */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#else 
-#include "default-config.h"
-#endif
-
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>

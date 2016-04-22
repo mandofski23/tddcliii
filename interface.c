@@ -17,25 +17,14 @@
     Copyright Vitaly Valtman 2013-2015
 */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#else 
-#include "default-config.h"
-#endif
-
 #include <assert.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef READLINE_GNU
 #include <readline/readline.h>
 #include <readline/history.h>
-#else
-#include <readline/readline.h>
-#include <readline/history.h>
-#endif
 #include <unistd.h>
 
 //#include "queries.h"
