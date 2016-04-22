@@ -165,8 +165,8 @@ char *get_home_directory (void) {
 }
 
 char *make_path (const char *a, const char *b) {
-  int la = strlen (a);
-  int lb = strlen (b);
+  size_t la = strlen (a);
+  size_t lb = strlen (b);
   char *res = malloc (la + lb + 2);
   assert (res);
   memcpy (res, a, la);
@@ -245,7 +245,7 @@ void running_for_first_time (void) {
 #ifdef HAVE_LIBCONFIG
 void parse_config_val (config_t *conf, char **s, char *param_name, const char *default_name, const char *path) {
   static char buf[1000]; 
-  int l = 0;
+  size_t l = 0;
   if (profile) {
     l = strlen (profile);
     memcpy (buf, profile, l);
@@ -293,7 +293,7 @@ void parse_config (void) {
   }
 
   static char buf[1000];
-  int l = 0;
+  size_t l = 0;
   if (profile) {
     l = strlen (profile);
     memcpy (buf, profile, l);
@@ -310,7 +310,7 @@ void parse_config (void) {
   strcpy (buf + l, "log_level");
   long long t = log_level;
   config_lookup_int (&conf, buf, (void *)&t);
-  log_level = t;
+  log_level = (int)t;
   
   if (!msg_num_mode) {
     strcpy (buf + l, "msg_num");
@@ -772,9 +772,6 @@ void sig_term_handler (int signum __attribute__ ((unused))) {
   if (write (1, "SIGTERM/SIGINT received\n", 25) < 0) { 
     // Sad thing
   }
-  //if (TLS && TLS->ev_base) {
-  //  event_base_loopbreak (TLS->ev_base);
-  //}
   sigterm_cnt ++;
 }
 
@@ -853,7 +850,7 @@ int main (int argc, char **argv) {
     
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = accept_any_tcp ? INADDR_ANY : htonl (0x7f000001);
-    serv_addr.sin_port = htons (port);
+    serv_addr.sin_port = htons ((short)port);
  
     if (bind (sfd, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0) {
       perror ("bind");

@@ -159,7 +159,7 @@ static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
   }
   if (read_one_string) {
     char c;
-    int r = read (0, &c, 1);
+    ssize_t r = read (0, &c, 1);
     if (r <= 0) {
       perror ("read");
       delete_stdin_event = 1;
@@ -189,7 +189,7 @@ static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
     line_buffer_size = line_buffer_size * 2 + 100;
     assert (line_buffer);
   }
-  int r = read (0, line_buffer + line_buffer_pos, line_buffer_size - line_buffer_pos);
+  ssize_t r = read (0, line_buffer + line_buffer_pos, line_buffer_size - line_buffer_pos);
   if (r <= 0) {
     perror ("read");
     delete_stdin_event = 1;
