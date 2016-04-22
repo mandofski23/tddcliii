@@ -61,16 +61,6 @@
 
 #include <pthread.h>
 
-pthread_mutex_t lock;
-
-void stdin_mutex_lock (void) {
-  pthread_mutex_lock (&lock);
-}
-
-void stdin_mutex_unlock (void) {
-  pthread_mutex_unlock (&lock);
-}
-
 struct event_base *ev_base;
 
 int read_pipe;
@@ -140,10 +130,8 @@ void do_get_string (struct tdlib_state *TLS, char *prompt, int flags) {
 }
 
 static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
-  stdin_mutex_lock ();
   if (!readline_disabled && !read_one_string) {
     rl_callback_read_char ();
-    stdin_mutex_unlock ();
     return;
   }
   if (read_one_string) {
@@ -152,13 +140,11 @@ static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
     if (r <= 0) {
       perror ("read");
       delete_stdin_event = 1;
-      stdin_mutex_unlock ();
       return;
     }
     if (c == '\n' || c == '\r') {
       one_string[one_string_len] = 0;
       one_string_read_end ();
-      stdin_mutex_unlock ();
       return;
     }
     if (one_string_len < MAX_ONE_STRING_LEN) {
@@ -168,7 +154,6 @@ static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
         fflush (stdout);
       }
     }
-    stdin_mutex_unlock ();
     return;
   }
 
@@ -182,7 +167,6 @@ static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
   if (r <= 0) {
     perror ("read");
     delete_stdin_event = 1;
-    stdin_mutex_unlock ();
     return;
   }
   line_buffer_pos += r;
@@ -199,7 +183,6 @@ static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
       break;
     }
   }
-  stdin_mutex_unlock ();
 }
 
 /*struct event *timer;
