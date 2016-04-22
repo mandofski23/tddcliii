@@ -1,3 +1,4 @@
 [submodule "tdc"]
 	path = tdc
 	url = git@bitbucket.org:vysheng/tdc
+  ignore = dirty
