@@ -2706,7 +2706,21 @@ void print_group_info_gw (struct tdlib_state *TLSR, void *extra, int success, st
     if (e && e->owner_type < 0) {
       struct tdl_chat_info *I = e->owner;
       print_chat_name (cmd->ev, I, I->id);
+    
+      if (I->photo) {
+        if (I->photo->big || I->photo->small) {
+          mprintf (cmd->ev, "\tphoto:");
+          if (I->photo->big) {
+            mprintf (cmd->ev, " big:[photo %d]", I->photo->big->id);
+          }
+          if (I->photo->small) {
+            mprintf (cmd->ev, " small:[photo %d]", I->photo->small->id);
+          }
+          mprintf (cmd->ev, "\n");
+        }
+      }
     }
+    
     mprintf (cmd->ev, " (id %d) members:\n", C->id);
     int i;
     for (i = 0; i < C->full->members_cnt; i++) {
@@ -2758,7 +2772,27 @@ void print_channel_info_gw (struct tdlib_state *TLSR, void *extra, int success, 
       mprintf (cmd->ev, " @%s", C->username);
     }
     mprintf (cmd->ev, " (#%d):\n", C->id);
-    mprintf (cmd->ev, "\tabout: %s\n", C->full->about);
+    if (C->full->about) {
+      mprintf (cmd->ev, "\tabout: %s\n", C->full->about);
+    }
+
+    if (e && e->owner_type < 0) {
+      struct tdl_chat_info *I = e->owner;
+    
+      if (I->photo) {
+        if (I->photo->big || I->photo->small) {
+          mprintf (cmd->ev, "\tphoto:");
+          if (I->photo->big) {
+            mprintf (cmd->ev, " big:[photo %d]", I->photo->big->id);
+          }
+          if (I->photo->small) {
+            mprintf (cmd->ev, " small:[photo %d]", I->photo->small->id);
+          }
+          mprintf (cmd->ev, "\n");
+        }
+      }
+    }
+
     mprintf (cmd->ev, "\t%d members, %d admins, %d kicked\n", C->full->members_cnt, C->full->admins_cnt, C->full->kicked_cnt);
     mpop_color (cmd->ev);
   } else {
@@ -2801,6 +2835,19 @@ void print_user_info_gw (struct tdlib_state *TLSR, void *extra, int success, str
     mprintf (cmd->ev, "\t");
     print_user_status (cmd->ev, U->status);
     mprintf (cmd->ev, "\n");
+
+    if (U->photo) {
+      if (U->photo->big || U->photo->small) {
+        mprintf (cmd->ev, "\tphoto:");
+        if (U->photo->big) {
+          mprintf (cmd->ev, " big:[photo %d]", U->photo->big->id);
+        }
+        if (U->photo->small) {
+          mprintf (cmd->ev, " small:[photo %d]", U->photo->small->id);
+        }
+        mprintf (cmd->ev, "\n");
+      }
+    }
 
     if (U->full->bot_info) {
       mprintf (cmd->ev, "\tdescription: %s\n", U->full->bot_info->description);
