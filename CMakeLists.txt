@@ -39,6 +39,8 @@ set (TDCLI_SOURCE
   main.c
   interface.c
   loop.c
+  lua-tg.c
+  json-tg.c
 )
 
 

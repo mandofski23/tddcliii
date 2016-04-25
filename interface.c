@@ -184,6 +184,7 @@ extern int alert_sound;
 extern int binlog_read;
 extern char *home_directory;
 int do_html;
+long long query_id;
 
 int safe_quit;
 
@@ -812,6 +813,7 @@ char *modifiers[] = {
   "[disable_preview]",
   "[html]",
   "[reply=",
+  "[id=",
   0
 };
 
@@ -2265,13 +2267,16 @@ void work_modifier (const char *s, ssize_t l) {
   if (sscanf (s, "[reply=%d]", &reply_id) >= 1) {
   }
   
-  /*if (is_same_word (s, l, "[html]")) {
-    do_html = TGLMF_HTML;
+  if (is_same_word (s, l, "[html]")) {
+    do_html = 1;
   }
   if (is_same_word (s, l, "[disable_preview]")) {
-    disable_msg_preview = TGL_SEND_MSG_FLAG_DISABLE_PREVIEW;
+    disable_msg_preview = 1;
   }
-  if (is_same_word (s, l, "[enable_preview]")) {
+  if (sscanf (s, "[id=%lld]", &query_id) >= 1) {
+  }
+
+  /*if (is_same_word (s, l, "[enable_preview]")) {
     disable_msg_preview = TGL_SEND_MSG_FLAG_ENABLE_PREVIEW;
   }*/
 #ifdef ALLOW_MULT
@@ -2283,10 +2288,16 @@ void work_modifier (const char *s, ssize_t l) {
 void print_fail (struct in_command *cmd) {
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
     mprintf (cmd->ev, "FAIL: %d: %s\n", TLS->error_code, TLS->error);
   } else {
   #ifdef USE_JSON
     json_t *res = json_object ();
+    if (cmd->query_id) {
+      assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+    }
     assert (json_object_set (res, "result", json_string ("FAIL")) >= 0);
     assert (json_object_set (res, "error_code", json_integer (TLS->error_code)) >= 0);
     assert (json_object_set (res, "error", json_string (TLS->error)) >= 0);
@@ -2312,11 +2323,16 @@ void fail_interface (struct tdlib_state *TLS, struct in_command *cmd, int error_
 
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
     mprintf (cmd->ev, "FAIL: %d: %s\n", error_code, error);
   } else {
   #ifdef USE_JSON
     json_t *res = json_object ();
-    assert (json_object_set (res, "result", json_string ("FAIL")) >= 0);
+    if (cmd->query_id) {
+      assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+    }
     assert (json_object_set (res, "error_code", json_integer (error_code)) >= 0);
     assert (json_object_set (res, "error", json_string (error)) >= 0);
     char *s = json_dumps (res, 0);
@@ -2332,6 +2348,9 @@ void print_success (struct in_command *cmd) {
   if (cmd->ev || enable_json) {
     mprint_start (cmd->ev);
     if (!enable_json) {
+      if (cmd->query_id) {
+        mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+      }
       mprintf (cmd, "SUCCESS\n");
     } else {
       #ifdef USE_JSON
@@ -2375,6 +2394,9 @@ void print_msg_list_gw (struct tdlib_state *TLSR, void *extra, int success, int 
 
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
+    }
     int i;
     for (i = num - 1; i >= 0; i--) {    
       print_message (cmd->ev, ML[i]);
@@ -2412,6 +2434,9 @@ void print_msg_gw (struct tdlib_state *TLSR, void *extra, int success, struct td
   if (!success) { print_fail (cmd); return; }
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
     print_message (cmd->ev, M);
   } else {
     #ifdef USE_JSON
@@ -2439,6 +2464,9 @@ void print_invite_link_gw (struct tdlib_state *TLSR, void *extra, int success, s
   mprint_start (cmd->ev);
   if (!enable_json) {
     mpush_color (cmd->ev, COLOR_YELLOW);
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
 
     if (info->is_group) {
       mprintf (cmd->ev, "Group ");
@@ -2470,6 +2498,9 @@ void print_user_list_gw (struct tdlib_state *TLSR, void *extra, int success, int
   
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
+    }
     int i;
     for (i = num - 1; i >= 0; i--) {
       if (UL[i]->id != 0) {
@@ -2505,6 +2536,9 @@ void print_chat_members_gw (struct tdlib_state *TLSR, void *extra, int success, 
   if (!enable_json) {
     int i;
     mpush_color (cmd->ev, COLOR_YELLOW);
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
+    }
     mprintf (cmd->ev, "Total %d members\n", total);
     for (i = num - 1; i >= 0; i--) {
       print_member (cmd->ev, UL[i]);
@@ -2536,6 +2570,9 @@ void print_chat_gw (struct tdlib_state *TLSR, void *extra, int success, struct t
   if (!success) { print_fail (cmd); return; }
   
   mprint_start (cmd->ev);
+  if (cmd->query_id) {
+    mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+  }
   print_chat_name (cmd->ev, C, C->id);
   mprintf (cmd->ev, "\n");
   mprint_end (cmd->ev);
@@ -2551,6 +2588,9 @@ void print_user_gw (struct tdlib_state *TLSR, void *extra, int success, struct t
   
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
     print_user_name (cmd->ev, U, U->id);
     mprintf (cmd->ev, "\n");
   } else {
@@ -2575,6 +2615,9 @@ void print_channel_gw (struct tdlib_state *TLSR, void *extra, int success, struc
   
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
     struct telegram_cli_chat_extra *e = C->extra;
     if (e && e->owner_type < 0) {
       struct tdl_chat_info *I = e->owner;
@@ -2602,6 +2645,9 @@ void print_filename_gw (struct tdlib_state *TLSR, void *extra, int success, cons
   
   mprint_start (cmd->ev);
   if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
     mprintf (cmd->ev, "Saved to %s\n", name);
   } else {
     #ifdef USE_JSON
@@ -2627,6 +2673,9 @@ void print_string_gw (struct tdlib_state *TLSR, void *extra, int success, const 
   mprint_start (cmd->ev);
   if (!enable_json) {
     mpush_color (cmd->ev, COLOR_YELLOW);
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
     mprintf (cmd->ev, "%s\n", name);
     mpop_color (cmd->ev);
   } else {
@@ -2701,6 +2750,9 @@ void print_group_info_gw (struct tdlib_state *TLSR, void *extra, int success, st
   
   if (!enable_json) {
     mpush_color (cmd->ev, COLOR_YELLOW);
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
+    }
     mprintf (cmd->ev, "Chat ");
     struct telegram_cli_chat_extra *e = C->extra;
     if (e && e->owner_type < 0) {
@@ -2753,6 +2805,9 @@ void print_channel_info_gw (struct tdlib_state *TLSR, void *extra, int success, 
   
   if (!enable_json) {
     mpush_color (cmd->ev, COLOR_YELLOW);
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
+    }
     if (C->is_supergroup) {
       mprintf (cmd->ev, "Supergroup ");
     } else {
@@ -2818,6 +2873,9 @@ void print_user_info_gw (struct tdlib_state *TLSR, void *extra, int success, str
   mprint_start (cmd->ev);
   if (!enable_json) {
     mpush_color (cmd->ev, COLOR_YELLOW);
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
+    }
     if (U->deleted) {
       mprintf (cmd->ev, "Deleted user ");
     } else {
@@ -2881,6 +2939,9 @@ void print_dialog_list_gw (struct tdlib_state *TLSR, void *extra, int success, i
   mprint_start (cmd->ev);
   if (!enable_json)  {
     mpush_color (cmd->ev, COLOR_YELLOW);
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
+    }
     int i;
     for (i = size - 1; i >= 0; i--) {
       mprintf (cmd->ev, "Dialog ");
@@ -3585,6 +3646,7 @@ void interpreter_ex (struct in_command *cmd) {
     return;
   }
 
+  query_id = 0;
   do_html = 0;
   line_ptr = line;
   offline_mode = 0;
@@ -3625,6 +3687,9 @@ void interpreter_ex (struct in_command *cmd) {
         return; 
       }
       work_modifier (cur_token, cur_token_len);
+      if (query_id) {
+        cmd->query_id = query_id;
+      }
       continue;
     }
     break;

@@ -98,6 +98,7 @@ struct in_command {
   char *line;
   struct in_ev *ev;
   int refcnt;
+  long long query_id;
   struct tdl_chat_info *chat_mode_chat;
 };
 void in_command_decref (struct in_command *cmd);
