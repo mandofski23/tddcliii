@@ -60,7 +60,7 @@ struct bufferevent;
 struct in_ev {
   struct bufferevent *bev;
   char in_buf[4096];
-  int in_buf_pos;
+  ssize_t in_buf_pos;
   int refcnt;
   int error;
   int fd;

@@ -82,8 +82,8 @@ extern int usfd;
 void got_it (char *line, int len);
 
 static char *line_buffer;
-static int line_buffer_size;
-static int line_buffer_pos;
+static ssize_t line_buffer_size;
+static ssize_t line_buffer_pos;
 static int delete_stdin_event;
 
 extern volatile int sigterm_cnt;

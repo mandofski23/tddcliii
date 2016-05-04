@@ -24,6 +24,14 @@ else (LIBEVENT2_FOUND)
   add_definitions("-DEVENT_V1=1")
 endif (LIBEVENT2_FOUND)
 
+option (USE_JSON "allow json serialization. Needs libjansson" ON)
+if (USE_JSON) 
+  find_package(LibJansson REQUIRED)
+  if (LIBJANSSON_FOUND)
+    add_definitions("-DUSE_JSON=1")
+  endif (LIBJANSSON_FOUND)
+endif (USE_JSON)
+
 include (CheckIncludeFiles)
 check_include_files (execinfo.h HAVE_EXECINFO_H)
 if (HAVE_EXECINFO_H) 
@@ -45,6 +53,6 @@ set (TDCLI_SOURCE
 
 
 add_executable (telegram-cli ${TDCLI_SOURCE})
-target_link_libraries (telegram-cli tdlibc ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${READLINE_LIBRARY} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} -lpthread )
+target_link_libraries (telegram-cli tdlibc ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${READLINE_LIBRARY} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} -lpthread )
 install (TARGETS telegram-cli
     RUNTIME DESTINATION bin)

@@ -17,8 +17,6 @@
     Copyright Vitaly Valtman 2013-2015
 */
 
-#define USE_JSON
-
 #include <assert.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -634,7 +632,7 @@ struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd)
     int i;
     for (i = 0; i < cur_token_len; i++) {
       if (s[i] >= 'A' && s[i] <= 'Z') {
-        s[i] = s[i] + 'a' - 'A';
+        s[i] = (char)(s[i] + 'a' - 'A');
       }
     }
   } 
@@ -1083,7 +1081,7 @@ void do_send_location (struct command *command, int arg_num, struct arg args[], 
     chat_id = args[0].chat->id;
   }
 
-  union tdl_input_message_content *content = tdlib_create_input_message_content_venue (TLS,  args[1].num, args[2].num, NULL, NULL, NULL, NULL);
+  union tdl_input_message_content *content = tdlib_create_input_message_content_venue (TLS, args[1].dval, args[2].dval, NULL, NULL, NULL, NULL);
   tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, (int)command->params[0], 0, 0, NULL, content);
 }
 
@@ -1567,18 +1565,18 @@ void do_search (struct command *command, int arg_num, struct arg args[], struct 
   } else {
     from = 0;
   }
-  int to;
+  /*int to;
   if (args[3].num != NOT_FOUND) {
     to = (int)args[3].num; 
   } else {
     to = 0;
-  }
-  int offset;
+  }*/
+  /*int offset;
   if (args[4].num != NOT_FOUND) {
     offset = (int)args[4].num; 
   } else {
     offset = 0;
-  }
+  }*/
   cmd->refcnt ++;
 
   if (args[0].chat) {
@@ -3262,7 +3260,7 @@ char *generate_alias_username (char *username) {
   char *t = s + 1;
   while (*t) {
     if (*t >= 'A' && *t <= 'Z') {
-      *t = *t + 'a' - 'A';
+      *t = (char)(*t + 'a' - 'A');
     }
     t ++;
   }
@@ -4372,7 +4370,7 @@ void logprintf (const char *format, ...) {
   printf (" *** ");
 
 
-  double T = time (0);
+  double T = (double)time (0);
   printf ("%.6lf ", T);
 
   va_list ap;
@@ -5070,10 +5068,10 @@ void print_message_action (struct in_ev *ev, union tdl_message_action *action) {
 
 void print_message_id (struct in_ev *ev, struct tdl_chat_info *C, int id) {
   if (permanent_msg_id_mode) {
-    int s[3];
+    /*int s[3];
     s[0] = C->chat->type;
     s[1] = C->chat->id;
-    s[2] = id;
+    s[2] = id;*/
     switch (C->chat->type) {
     case tdl_chat_type_user:
       mprintf (ev, "user#id%d@%d ", C->chat->user.id, id);

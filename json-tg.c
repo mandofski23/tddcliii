@@ -1,4 +1,3 @@
-#define USE_JSON
 #ifdef USE_JSON
 
 #include <jansson.h>
@@ -594,6 +593,9 @@ json_t *json_pack_content (union tdl_message_content *C) {
     return json_pack_content_deleted (&C->deleted);
   case tdl_message_content_type_unsupported:
     return json_pack_content_unsupported (&C->unsupported);
+  default:
+    assert (0);
+    return NULL;
   }
 }
 
