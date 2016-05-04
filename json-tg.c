@@ -1,9 +1,9 @@
+#define USE_JSON
 #ifdef USE_JSON
 
 #include <jansson.h>
+#include "tdc/tdlib-c-bindings.h"
 #include "json-tg.h"
-#include <tgl/tgl.h>
-#include <tgl/tgl-layout.h>
 #include "interface.h"
 #include <assert.h>
 //format time:
@@ -13,496 +13,974 @@
 #define json_boolean(val)      ((val) ? json_true() : json_false())
 #endif
 
-extern struct tgl_state *TLS;
+extern struct tdlib_state *TLS;
 
-void json_pack_peer_type (json_t *res, tgl_peer_id_t id) {
-  int x = tgl_get_peer_type (id);
-  switch (x) {
-  case TGL_PEER_USER:
-    assert (json_object_set (res, "peer_type", json_string ("user")) >= 0);
-    break;
-  case TGL_PEER_CHAT:
-    assert (json_object_set (res, "peer_type", json_string ("chat")) >= 0);
-    break;
-  case TGL_PEER_ENCR_CHAT:
-    assert (json_object_set (res, "peer_type", json_string ("encr_chat")) >= 0);
-    break;
-  case TGL_PEER_CHANNEL:
-    assert (json_object_set (res, "peer_type", json_string ("channel")) >= 0);
-    break;
-  default:
-    assert (0);
-  }
-}
-
-int str_format_time(long when, char* string)
-{
-  struct tm *tm = localtime ((void *)&when);
-  return sprintf (string, "%04d-%02d-%02d %02d:%02d:%02d", tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
-}
-
-void json_pack_user (json_t *res, tgl_peer_t *P) {
-  if (P->user.first_name) {
-    assert (json_object_set (res, "first_name", json_string (P->user.first_name)) >= 0);
-  }
-
-  if (P->user.status.when) {
-    static char s[20];
-    str_format_time(P->user.status.when, s);
-    assert (json_object_set (res, "when", json_string (s)) >= 0);
-  }
-
-  if (P->user.last_name) {
-    assert (json_object_set (res, "last_name", json_string (P->user.last_name)) >= 0);
-  }
-  if (P->user.real_first_name) {
-    assert (json_object_set (res, "real_first_name", json_string (P->user.real_first_name)) >= 0);
-  }
-  if (P->user.real_last_name) {
-    assert (json_object_set (res, "real_last_name", json_string (P->user.real_last_name)) >= 0);
-  }
-  if (P->user.phone) {
-    assert (json_object_set (res, "phone", json_string (P->user.phone)) >= 0);
-  }
-  if (P->user.username) {
-    assert (json_object_set (res, "username", json_string (P->user.username)) >= 0);
-  }
-}
-
-void json_pack_chat (json_t *res, tgl_peer_t *P) {
-  assert (P->chat.title);
-  assert (json_object_set (res, "title", json_string (P->chat.title)) >= 0);
-  tgl_peer_id_t admin_id = TGL_MK_USER (P->chat.admin_id);
-  assert (json_object_set (res, "admin", json_pack_peer (admin_id)) >= 0);
-  assert (json_object_set (res, "members_num", json_integer (P->chat.users_num)) >= 0);
-  if (P->chat.user_list) {
-    json_t *m = json_array ();
-    assert (m);
-
-    int i;
-    for (i = 0; i < P->chat.users_num; i++) {
-      tgl_peer_id_t user_id = TGL_MK_USER (P->chat.user_list[i].user_id);
-      tgl_peer_id_t inviter_id = TGL_MK_USER (P->chat.user_list[i].inviter_id);
-      json_t *peer = json_pack_peer (user_id);
-      assert (json_object_set (peer, "inviter", json_pack_peer (inviter_id)) >= 0);
-      assert (json_array_append (m, peer) >= 0);
-    }
-
-    assert (json_object_set (res, "members", m) >= 0);
-  }
-}
-
-void json_pack_channel (json_t *res, tgl_peer_t *P) {
-  assert (P->channel.title);
-  assert (json_object_set (res, "title", json_string (P->channel.title)) >= 0);
-  assert (json_object_set (res, "participants_count", json_integer (P->channel.participants_count)) >= 0);
-  assert (json_object_set (res, "admins_count", json_integer (P->channel.admins_count)) >= 0);
-  assert (json_object_set (res, "kicked_count", json_integer (P->channel.kicked_count)) >= 0);
-}
-
-
-void json_pack_encr_chat (json_t *res, tgl_peer_t *P) {
-  assert (json_object_set (res, "user", json_pack_peer (TGL_MK_USER (P->encr_chat.user_id))) >= 0);
-}
-
-json_t *json_pack_peer (tgl_peer_id_t id) {
-  tgl_peer_t *P = tgl_peer_get (TLS, id);
-  //assert (P);
-  json_t *res = json_object ();
-  assert (json_object_set (res, "id", json_string (print_permanent_peer_id (id))) >= 0);
-
-  json_pack_peer_type (res, id);
-  assert (json_object_set (res, "peer_id", json_integer (tgl_get_peer_id (id))) >= 0);
-
-  assert (res);
-    
-  if (!P || !(P->flags & TGLPF_CREATED)) {
-    static char s[100];
-    switch (tgl_get_peer_type (id)) {
-    case TGL_PEER_USER:
-      sprintf (s, "user#%d", tgl_get_peer_id (id));
+json_t *json_pack_message_id (enum tdl_chat_type type, int chat_id, int message_id) {
+  char s[100];
+  switch (type) {
+    case tdl_chat_type_user:
+      sprintf (s, "user#id%d@%d ", chat_id, message_id);
       break;
-    case TGL_PEER_CHAT:
-      sprintf (s, "chat#%d", tgl_get_peer_id (id));
+    case tdl_chat_type_group:
+      sprintf (s, "group#id%d@%d ", chat_id, message_id);
       break;
-    case TGL_PEER_CHANNEL:
-      sprintf (s, "channel#%d", tgl_get_peer_id (id));
+    case tdl_chat_type_channel:
+      sprintf (s, "channel#id%d@%d ", chat_id, message_id);
       break;
-    case TGL_PEER_ENCR_CHAT:
-      sprintf (s, "encr_chat#%d", tgl_get_peer_id (id));
+    case tdl_chat_type_secret_chat:
+      sprintf (s, "secret_chat#id%d@%d ", chat_id, message_id);
       break;
     default:
       assert (0);
-    }
-    
-    assert (json_object_set (res, "print_name", json_string (s)) >= 0);
-    return res;
   }
-  if(P->print_name != NULL){
-    assert (json_object_set (res, "print_name", json_string (P->print_name)) >= 0);
-  } else {
-    assert (json_object_set (res, "print_name", json_string ("")) >= 0);
+  return json_string (s);
+}
+
+json_t *json_pack_forward_info (struct tdl_message_forward_info *F) {
+  json_t *res = json_object ();
+  if (F->user_id) {
+    json_object_set (res, "user_id", json_integer (F->user_id));
   }
-  assert (json_object_set (res, "flags", json_integer (P->flags)) >= 0);
+  if (F->chat_id) {
+    json_object_set (res, "chat_id", json_integer (F->chat_id));
+  }
+  if (F->date) {
+    json_object_set (res, "date", json_integer (F->date));
+  }
+  if (F->msg_id) {
+    json_object_set (res, "msg_id", json_integer (F->msg_id));
+  }
+  return res;
+}
+
+json_t *json_pack_file (struct tdl_file *F) {
+  json_t *res = json_object ();
+  json_object_set (res, "id", json_integer (F->id));
+  json_object_set (res, "size", json_integer (F->size));
+  if (F->path) {
+    json_object_set (res, "path", json_string (F->path));
+  }
+
+  return res;
+}
+
+json_t *json_pack_photo_size (struct tdl_photo_size *F) {
+  json_t *res = json_object ();
+  if (F->type) {
+    json_object_set (res, "type", json_string (F->type));
+  }
+  json_object_set (res, "file", json_pack_file (F->file));
+  json_object_set (res, "width", json_integer (F->width));
+  json_object_set (res, "height", json_integer (F->height));
+
+  return res;
+}
+
+json_t *json_pack_entity (union tdl_message_entity *E) {
+  json_t *res = json_object ();
+  switch (E->type) {
+  case tdl_message_entity_mention:
+    json_object_set (res, "type", json_string ("mention"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_hashtag:
+    json_object_set (res, "type", json_string ("hashtag"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_bot_command:
+    json_object_set (res, "type", json_string ("bot_command"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_url:
+    json_object_set (res, "type", json_string ("url"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_email:
+    json_object_set (res, "type", json_string ("email"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_bold:
+    json_object_set (res, "type", json_string ("bold"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_italic:
+    json_object_set (res, "type", json_string ("italic"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_code:
+    json_object_set (res, "type", json_string ("code"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_pre:
+    json_object_set (res, "type", json_string ("pre"));
+    json_object_set (res, "offset", json_integer (E->simple.offset));
+    json_object_set (res, "length", json_integer (E->simple.length));
+    break;
+  case tdl_message_entity_pre_code:
+    json_object_set (res, "type", json_string ("pre_code"));
+    json_object_set (res, "offset", json_integer (E->pre_code.offset));
+    json_object_set (res, "length", json_integer (E->pre_code.length));
+    json_object_set (res, "language", json_string (E->pre_code.language));
+    break;
+  case tdl_message_entity_text_url:
+    json_object_set (res, "type", json_string ("text_url"));
+    json_object_set (res, "offset", json_integer (E->text_url.offset));
+    json_object_set (res, "length", json_integer (E->text_url.length));
+    json_object_set (res, "url", json_string (E->text_url.url));
+    break;
+  }
+  return res;
+}
+
+json_t *json_pack_web_page (struct tdl_web_page *W);
+json_t *json_pack_content_text (struct tdl_message_content_text *C) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("text"));
   
-  switch (tgl_get_peer_type (id)) {
-  case TGL_PEER_USER:
-    json_pack_user (res, P);
-    break;
-  case TGL_PEER_CHAT:
-    json_pack_chat (res, P);
-    break;
-  case TGL_PEER_ENCR_CHAT:
-    json_pack_encr_chat (res, P);
-    break;
-  case TGL_PEER_CHANNEL:
-    json_pack_channel (res, P);
-    break;
+  json_object_set (res, "text", json_string (C->text));
+
+  if (C->web_page) {  
+    json_object_set (res, "web_page", json_pack_web_page (C->web_page));
+  }
+
+  if (C->entities_cnt) {
+    json_t *arr = json_array ();
+    int i;
+    for (i = 0; i < C->entities_cnt; i++) {
+      json_array_append (arr, json_pack_entity (C->entities[i]));
+    }
+    json_object_set (res, "entities", arr);
+  }
+
+  return res;
+}
+
+json_t *json_pack_media_animation (struct tdl_animation *M) {
+  json_t *res = json_object ();
+  
+  json_object_set (res, "type", json_string ("animation"));
+  json_object_set (res, "file", json_pack_file (M->file));
+  if (M->mime_type) {
+    json_object_set (res, "mime_type", json_string (M->mime_type));
+  }
+  if (M->file_name) {
+    json_object_set (res, "file_name", json_string (M->file_name));
+  }
+  if (M->thumb) {
+    json_object_set (res, "thumb", json_pack_photo_size (M->thumb));
+  }
+ 
+  json_object_set (res, "width", json_integer (M->width));
+  json_object_set (res, "height", json_integer (M->height));
+  
+  return res;
+}
+
+json_t *json_pack_media_audio (struct tdl_audio *M) {
+  json_t *res = json_object ();
+  
+  json_object_set (res, "type", json_string ("audio"));
+  json_object_set (res, "file", json_pack_file (M->file));
+  if (M->file_name) {
+    json_object_set (res, "file_name", json_string (M->file_name));
+  }
+  if (M->mime_type) {
+    json_object_set (res, "mime_type", json_string (M->mime_type));
+  }
+  if (M->title) {
+    json_object_set (res, "title", json_string (M->title));
+  }
+  if (M->performer) {
+    json_object_set (res, "performer", json_string (M->performer));
+  }
+  json_object_set (res, "duration", json_integer (M->duration));
+  if (M->album_cover_thumb) {
+    json_object_set (res, "album_cover_thumb", json_pack_photo_size (M->album_cover_thumb));
+  }
+  return res;
+}
+
+json_t *json_pack_media_document (struct tdl_document *M) {
+  json_t *res = json_object ();
+  
+  json_object_set (res, "type", json_string ("document"));
+  json_object_set (res, "file", json_pack_file (M->file));
+  if (M->mime_type) {
+    json_object_set (res, "mime_type", json_string (M->mime_type));
+  }
+  if (M->file_name) {
+    json_object_set (res, "file_name", json_string (M->file_name));
+  }
+  if (M->thumb) {
+    json_object_set (res, "thumb", json_pack_photo_size (M->thumb));
+  }
+  
+  return res;
+}
+
+json_t *json_pack_media_photo (struct tdl_photo *M) {
+  json_t *res = json_object ();
+  
+  json_object_set (res, "type", json_string ("photo"));
+  json_object_set (res, "id", json_integer (M->id));
+
+  json_t *arr = json_array ();
+  int i;
+  for (i = 0; i < M->sizes_cnt; i++) {
+    json_array_append (arr, json_pack_photo_size (M->sizes[i]));
+  }
+  json_object_set (res, "sizes", arr);
+  
+  return res;
+}
+
+json_t *json_pack_media_sticker (struct tdl_sticker *M) {
+  json_t *res = json_object ();
+  
+  json_object_set (res, "type", json_string ("sticker"));
+  json_object_set (res, "file", json_pack_file (M->file));
+  if (M->emoji) {
+    json_object_set (res, "emoji", json_string (M->emoji));
+  }
+  if (M->thumb) {
+    json_object_set (res, "thumb", json_pack_photo_size (M->thumb));
+  }
+  json_object_set (res, "set_id", json_integer (M->set_id));
+  json_object_set (res, "height", json_integer (M->height));
+  json_object_set (res, "width", json_integer (M->width));
+  json_object_set (res, "rating", json_real (M->rating));
+ 
+  return res;
+}
+
+json_t *json_pack_media_video (struct tdl_video *M) {
+  json_t *res = json_object ();
+  
+  json_object_set (res, "type", json_string ("video"));
+  json_object_set (res, "file", json_pack_file (M->file));
+  if (M->mime_type) {
+    json_object_set (res, "mime_type", json_string (M->mime_type));
+  }
+  if (M->file_name) {
+    json_object_set (res, "file_name", json_string (M->file_name));
+  }
+  if (M->thumb) {
+    json_object_set (res, "thumb", json_pack_photo_size (M->thumb));
+  }
+ 
+  json_object_set (res, "duration", json_integer (M->duration));
+  json_object_set (res, "width", json_integer (M->width));
+  json_object_set (res, "height", json_integer (M->height));
+  
+  return res;
+}
+
+json_t *json_pack_media_voice (struct tdl_voice *M) {
+  json_t *res = json_object ();
+  
+  json_object_set (res, "type", json_string ("voice"));
+  json_object_set (res, "file", json_pack_file (M->file));
+  if (M->mime_type) {
+    json_object_set (res, "mime_type", json_string (M->mime_type));
+  }
+  if (M->file_name) {
+    json_object_set (res, "file_name", json_string (M->file_name));
+  }
+  if (M->thumb) {
+    json_object_set (res, "thumb", json_pack_photo_size (M->thumb));
+  }
+ 
+  json_object_set (res, "duration", json_integer (M->duration));
+  if (M->waveform) {
+    json_object_set (res, "waveform", json_stringn ((char *)M->waveform, M->waveform_size));
+  }
+  
+  return res;
+}
+
+json_t *json_pack_web_page (struct tdl_web_page *W) {
+  json_t *res = json_object ();
+  if (W->url) {
+    json_object_set (res, "url", json_string (W->url));
+  }
+  if (W->display_url) {
+    json_object_set (res, "display_url", json_string (W->display_url));
+  }
+  if (W->web_page_type) {
+    json_object_set (res, "web_page_type", json_string (W->web_page_type));
+  }
+  if (W->site_name) {
+    json_object_set (res, "site_name", json_string (W->site_name));
+  }
+  if (W->title) {
+    json_object_set (res, "title", json_string (W->title));
+  }
+  if (W->description) {
+    json_object_set (res, "description", json_string (W->description));
+  }
+  if (W->embed_url) {
+    json_object_set (res, "embed_url", json_string (W->embed_url));
+  }
+  if (W->embed_mime_type) {
+    json_object_set (res, "embed_mime_type", json_string (W->embed_mime_type));
+  }
+  if (W->embed_width) {
+    json_object_set (res, "embed_width", json_integer (W->embed_width));
+  }
+  if (W->embed_height) {
+    json_object_set (res, "embed_height", json_integer (W->embed_height));
+  }
+  if (W->duration) {
+    json_object_set (res, "duration", json_integer (W->duration));
+  }
+  if (W->author) {
+    json_object_set (res, "author", json_string (W->author));
+  }
+  if (W->animation) {
+    json_object_set (res, "animation", json_pack_media_animation (W->animation));
+  }
+  if (W->photo) {
+    json_object_set (res, "photo", json_pack_media_photo (W->photo));
+  }
+  if (W->document) {
+    json_object_set (res, "document", json_pack_media_document (W->document));
+  }
+  if (W->sticker) {
+    json_object_set (res, "sticker", json_pack_media_sticker (W->sticker));
+  }
+  return res;
+}
+
+json_t *json_pack_media (union tdl_message_media *M) {
+  switch (M->type) {
+  case tdl_media_animation:
+    return json_pack_media_animation (&M->animation);
+  case tdl_media_audio:
+    return json_pack_media_audio (&M->audio);
+  case tdl_media_document:
+    return json_pack_media_document (&M->document);
+  case tdl_media_photo:
+    return json_pack_media_photo (&M->photo);
+  case tdl_media_sticker:
+    return json_pack_media_sticker (&M->sticker);
+  case tdl_media_video:
+    return json_pack_media_video (&M->video);
+  case tdl_media_voice:
+    return json_pack_media_voice (&M->voice);
   default:
     assert (0);
+    return NULL;
   }
-  return res;
 }
 
-json_t *json_pack_updates (unsigned flags) {
-  json_t *a = json_array ();
+json_t *json_pack_content_media (struct tdl_message_content_media *C) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("media"));
   
-  if (flags & TGL_UPDATE_CREATED) {
-    assert (json_array_append (a, json_string ("created")) >= 0);
-  }  
-  if (flags & TGL_UPDATE_DELETED) {
-    assert (json_array_append (a, json_string ("deleted")) >= 0);
-  }  
-  if (flags & TGL_UPDATE_PHONE) {
-    assert (json_array_append (a, json_string ("phone")) >= 0);
+  if (C->caption) {
+    json_object_set (res, "caption", json_string (C->caption));
   }
-  if (flags & TGL_UPDATE_CONTACT) {
-    assert (json_array_append (a, json_string ("contact")) >= 0);
-  }
-  if (flags & TGL_UPDATE_PHOTO) {
-    assert (json_array_append (a, json_string ("photo")) >= 0);
-  }
-  if (flags & TGL_UPDATE_BLOCKED) {
-    assert (json_array_append (a, json_string ("blocked")) >= 0);
-  }
-  if (flags & TGL_UPDATE_REAL_NAME) {
-    assert (json_array_append (a, json_string ("real_name")) >= 0);
-  }
-  if (flags & TGL_UPDATE_NAME) {
-    assert (json_array_append (a, json_string ("name")) >= 0);
-  }
-  if (flags & TGL_UPDATE_REQUESTED) {
-    assert (json_array_append (a, json_string ("requested")) >= 0);
-  }
-  if (flags & TGL_UPDATE_WORKING) {
-    assert (json_array_append (a, json_string ("working")) >= 0);
-  }
-  if (flags & TGL_UPDATE_FLAGS) {
-    assert (json_array_append (a, json_string ("flags")) >= 0);
-  }
-  if (flags & TGL_UPDATE_TITLE) {
-    assert (json_array_append (a, json_string ("title")) >= 0);
-  }
-  if (flags & TGL_UPDATE_ADMIN) {
-    assert (json_array_append (a, json_string ("admin")) >= 0);
-  }
-  if (flags & TGL_UPDATE_MEMBERS) {
-    assert (json_array_append (a, json_string ("members")) >= 0);
-  }
-  if (flags & TGL_UPDATE_USERNAME) {
-    assert (json_array_append (a, json_string ("username")) >= 0);
-  }
+  
+  json_object_set (res, "is_watched", json_boolean (C->is_watched));
+  json_object_set (res, "media", json_pack_media (C->media));
 
-  return a;
-}
-
-
-json_t *json_pack_media (struct tgl_message_media *M) {
-  json_t *res = json_object ();
-
-  switch (M->type) {
-  case tgl_message_media_photo:
-    assert (json_object_set (res, "type", json_string ("photo")) >= 0);
-    if (M->caption) {
-      assert (json_object_set (res, "caption", json_string (M->caption)) >= 0);
-    }
-    break;
-  case tgl_message_media_document:
-  case tgl_message_media_audio:
-  case tgl_message_media_video:
-  case tgl_message_media_document_encr:
-    assert (json_object_set (res, "type", json_string ("document")) >= 0);
-    break;
-  case tgl_message_media_unsupported:
-    assert (json_object_set (res, "type", json_string ("unsupported")) >= 0);
-    break;
-  case tgl_message_media_geo:
-    assert (json_object_set (res, "type", json_string ("geo")) >= 0);
-    assert (json_object_set (res, "longitude", json_real (M->geo.longitude)) >= 0);
-    assert (json_object_set (res, "latitude", json_real (M->geo.latitude)) >= 0);
-    break;
-  case tgl_message_media_contact:
-    assert (json_object_set (res, "type", json_string ("contact")) >= 0);
-    assert (json_object_set (res, "phone", json_string (M->phone)) >= 0);
-    assert (json_object_set (res, "first_name", json_string (M->first_name)) >= 0);
-    assert (json_object_set (res, "last_name", json_string (M->last_name)) >= 0);
-    assert (json_object_set (res, "user_id", json_integer (M->user_id)) >= 0);
-    break;
-  case tgl_message_media_webpage:
-    assert (json_object_set (res, "type", json_string ("webpage")) >= 0);
-    if (M->webpage->url) {
-      assert (json_object_set (res, "url", json_string (M->webpage->url)) >= 0);
-    }
-    if (M->webpage->title) {
-      assert (json_object_set (res, "title", json_string (M->webpage->title)) >= 0);
-    }
-    if (M->webpage->description) {
-      assert (json_object_set (res, "description", json_string (M->webpage->description)) >= 0);
-    }
-    if (M->webpage->author) {
-      assert (json_object_set (res, "author", json_string (M->webpage->author)) >= 0);
-    }
-    break;
-  case tgl_message_media_venue:
-    assert (json_object_set (res, "type", json_string ("venue")) >= 0);
-    assert (json_object_set (res, "longitude", json_real (M->venue.geo.longitude)) >= 0);
-    assert (json_object_set (res, "latitude", json_real (M->venue.geo.latitude)) >= 0);
-    if (M->venue.title) {
-      assert (json_object_set (res, "type", json_string (M->venue.title)) >= 0);
-    }
-    if (M->venue.address) {
-      assert (json_object_set (res, "address", json_string (M->venue.address)) >= 0);
-    }
-    if (M->venue.provider) {
-      assert (json_object_set (res, "provider", json_string (M->venue.provider)) >= 0);
-    }
-    if (M->venue.venue_id) {
-      assert (json_object_set (res, "venue_id", json_string (M->venue.venue_id)) >= 0);
-    }
-    break;
-  default:
-    assert (json_object_set (res, "type", json_string ("???")) >= 0);
-  }
   return res;
 }
 
-json_t *json_pack_typing (enum tgl_typing_status status) {
+json_t *json_pack_content_venue (struct tdl_message_content_venue *C) {
   json_t *res = json_object ();
-  switch (status) {
-    case tgl_typing_none:
-      assert (json_object_set (res, "status", json_string ("doing nothing")) >= 0);
-      break;
-    case tgl_typing_typing:
-      assert (json_object_set (res, "status", json_string ("typing")) >= 0);
-      break;
-    case tgl_typing_cancel:
-       assert (json_object_set (res, "status", json_string ("deleting typed message")) >= 0);
-       break;
-    case tgl_typing_record_video:
-       assert (json_object_set (res, "status", json_string ("recording video")) >= 0);
-       break;
-    case tgl_typing_upload_video:
-       assert (json_object_set (res, "status", json_string ("uploading video")) >= 0);
-       break;
-    case tgl_typing_record_audio:
-       assert (json_object_set (res, "status", json_string ("recording audio")) >= 0);
-       break;
-    case tgl_typing_upload_audio:
-       assert (json_object_set (res, "status", json_string ("uploading audio")) >= 0);
-       break;
-    case tgl_typing_upload_photo:
-       assert (json_object_set (res, "status", json_string ("uploading photo")) >= 0);
-       break;
-    case tgl_typing_upload_document:
-       assert (json_object_set (res, "status", json_string ("uploading document")) >= 0);
-       break;
-    case tgl_typing_geo:
-       assert (json_object_set (res, "status", json_string ("choosing location")) >= 0);
-       break;
-    case tgl_typing_choose_contact:
-       assert (json_object_set (res, "status", json_string ("choosing contact")) >= 0);
-       break;
-    default:
-       assert (json_object_set (res, "status", json_string ("???")) >= 0);
-       break;
+  json_object_set (res, "type", json_string ("venue"));
+  json_object_set (res, "longitude", json_real (C->longitude));
+  json_object_set (res, "latitude", json_real (C->latitude));
+  if (C->title) {
+    json_object_set (res, "title", json_string (C->title));
   }
+  if (C->address) {
+    json_object_set (res, "address", json_string (C->address));
+  }
+  if (C->provider) {
+    json_object_set (res, "provider", json_string (C->provider));
+  }
+  if (C->venue_id) {
+    json_object_set (res, "venue_id", json_string (C->venue_id));
+  }
+
   return res;
 }
 
-json_t *json_pack_service (struct tgl_message *M) {
+json_t *json_pack_content_contact (struct tdl_message_content_contact *C) {
   json_t *res = json_object ();
-  switch (M->action.type) {
-  case tgl_message_action_geo_chat_create:
-    assert (json_object_set (res, "type", json_string ("geo_created")) >= 0);
-    break;
-  case tgl_message_action_geo_chat_checkin:
-    assert (json_object_set (res, "type", json_string ("geo_checkin")) >= 0);
-    break;
-  case tgl_message_action_chat_create:
-    assert (json_object_set (res, "type", json_string ("chat_created")) >= 0);
-    assert (json_object_set (res, "title", json_string (M->action.title)) >= 0);
-    break;
-  case tgl_message_action_chat_edit_title:
-    assert (json_object_set (res, "type", json_string ("chat_rename")) >= 0);
-    assert (json_object_set (res, "title", json_string (M->action.title)) >= 0);
-    break;
-  case tgl_message_action_chat_edit_photo:
-    assert (json_object_set (res, "type", json_string ("chat_change_photo")) >= 0);
-    break;
-  case tgl_message_action_chat_delete_photo:
-    assert (json_object_set (res, "type", json_string ("chat_delete_photo")) >= 0);
-    break;
-  case tgl_message_action_chat_add_users:
-    assert (json_object_set (res, "type", json_string ("chat_add_user")) >= 0);
-    assert (json_object_set (res, "user", json_pack_peer (tgl_set_peer_id (TGL_PEER_USER, M->action.users[0]))) >= 0);
-    break;
-  case tgl_message_action_chat_add_user_by_link:
-    assert (json_object_set (res, "type", json_string ("chat_add_user_link")) >= 0);
-    assert (json_object_set (res, "user", json_pack_peer (tgl_set_peer_id (TGL_PEER_USER, M->action.user))) >= 0);
-    break;
-  case tgl_message_action_chat_delete_user:
-    assert (json_object_set (res, "type", json_string ("chat_del_user")) >= 0);
-    assert (json_object_set (res, "user", json_pack_peer (tgl_set_peer_id (TGL_PEER_USER, M->action.user))) >= 0);
-    break;
-  case tgl_message_action_set_message_ttl:
-    assert (json_object_set (res, "type", json_string ("set_ttl")) >= 0);
-    assert (json_object_set (res, "ttl", json_integer (M->action.ttl)) >= 0);
-    break;
-  case tgl_message_action_read_messages:
-    assert (json_object_set (res, "type", json_string ("read")) >= 0);
-    assert (json_object_set (res, "count", json_integer (M->action.read_cnt)) >= 0);
-    break;
-  case tgl_message_action_delete_messages:
-    assert (json_object_set (res, "type", json_string ("delete")) >= 0);
-    assert (json_object_set (res, "count", json_integer (M->action.delete_cnt)) >= 0);
-    break;
-  case tgl_message_action_screenshot_messages:
-    assert (json_object_set (res, "type", json_string ("screenshot")) >= 0);
-    assert (json_object_set (res, "count", json_integer (M->action.screenshot_cnt)) >= 0);
-    break;
-  case tgl_message_action_flush_history:
-    assert (json_object_set (res, "type", json_string ("flush")) >= 0);
-    break;
-  case tgl_message_action_resend:
-    assert (json_object_set (res, "type", json_string ("resend")) >= 0);
-    break;
-  case tgl_message_action_notify_layer:
-    assert (json_object_set (res, "type", json_string ("notify_layer")) >= 0);
-    assert (json_object_set (res, "layer", json_integer (M->action.layer)) >= 0);
-    break;
-  case tgl_message_action_typing:    
-    assert (json_object_set (res, "type", json_string ("typing")) >= 0);
-    assert (json_array_append (res, json_pack_typing (M->action.typing)) >= 0);
-    break;
-  case tgl_message_action_noop:
-    assert (json_object_set (res, "type", json_string ("noop")) >= 0);
-    break;
-  case tgl_message_action_request_key:
-    assert (json_object_set (res, "type", json_string ("request_key")) >= 0);
-    break;
-  case tgl_message_action_accept_key:
-    assert (json_object_set (res, "type", json_string ("accept_key")) >= 0);
-    break;
-  case tgl_message_action_commit_key:
-    assert (json_object_set (res, "type", json_string ("commit_key")) >= 0);
-    break;
-  case tgl_message_action_abort_key:
-    assert (json_object_set (res, "type", json_string ("abort_key")) >= 0);
-    break;
-  case tgl_message_action_channel_create:
-    assert (json_object_set (res, "type", json_string ("channel_created")) >= 0);
-    assert (json_object_set (res, "title", json_string (M->action.title)) >= 0);
-    break;
-  case tgl_message_action_migrated_to:
-    assert (json_object_set (res, "type", json_string ("migrated_to")) >= 0);
-    break;
-  case tgl_message_action_migrated_from:
-    assert (json_object_set (res, "type", json_string ("migrated_from")) >= 0);
-    break;
-  default:
-    assert (json_object_set (res, "type", json_string ("???")) >= 0);
-    break;
+  json_object_set (res, "type", json_string ("contact"));
+  if (C->first_name) {
+    json_object_set (res, "first_name", json_string (C->first_name));
   }
+  if (C->last_name) {
+    json_object_set (res, "last_name", json_string (C->last_name));
+  }
+  if (C->phone) {  
+    json_object_set (res, "phone", json_string (C->phone));
+  }
+  if (C->user_id) {
+    json_object_set (res, "user_id", json_integer (C->user_id));
+  }
+
   return res;
 }
 
-json_t *json_pack_message (struct tgl_message *M) {  
+json_t *json_pack_action_group_create (struct tdl_message_action_group_create *A) {
   json_t *res = json_object ();
-  assert (json_object_set (res, "event", json_string ("message")) >= 0);
-  //will overwriten to service, if service.
+  json_object_set (res, "type", json_string ("group_create"));
+  json_object_set (res, "title", json_string (A->title));
+  json_t *arr = json_array ();
+  int i;
+  for (i = 0; i < A->members_cnt; i++) {
+    json_array_append (arr, json_pack_user (A->members[i]));
+  }
+  json_object_set (res, "members", arr);
+  return res;
+}
 
-  assert (json_object_set (res, "id", json_string (print_permanent_msg_id (M->permanent_id))) >= 0);
-  if (!(M->flags & TGLMF_CREATED)) { return res; }
+json_t *json_pack_action_channel_create (struct tdl_message_action_channel_create *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("channel_create"));
+  json_object_set (res, "title", json_string (A->title));
+  return res;
+}
 
-  assert (json_object_set (res, "flags", json_integer (M->flags)) >= 0);
+json_t *json_pack_action_chat_change_title (struct tdl_message_action_chat_change_title *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_change_title"));
+  json_object_set (res, "title", json_string (A->title));
+  return res;
+}
+
+json_t *json_pack_action_chat_change_photo (struct tdl_message_action_chat_change_photo *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_change_photo"));
+  //json_object_set (res, "photo", json_string (A->title));
+  return res;
+}
+
+json_t *json_pack_action_chat_delete_photo (struct tdl_message_action_chat_delete_photo *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_delete_photo"));
+  return res;
+}
+
+json_t *json_pack_action_chat_add_members (struct tdl_message_action_chat_add_members *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_add_members"));
+  json_t *arr = json_array ();
+  int i;
+  for (i = 0; i < A->members_cnt; i++) {
+    json_array_append (arr, json_pack_user (A->members[i]));
+  }
+  json_object_set (res, "members", arr);
+  return res;
+}
+
+json_t *json_pack_action_chat_join_by_link (struct tdl_message_action_chat_join_by_link *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_join_by_link"));
+  json_object_set (res, "inviter_user_id", json_integer (A->inviter_user_id));
+  return res;
+}
+
+json_t *json_pack_action_chat_delete_member (struct tdl_message_action_chat_delete_member *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_join_by_link"));
+  json_object_set (res, "member", json_pack_user (A->user));
+  return res;
+}
+
+json_t *json_pack_action_chat_migrate_to (struct tdl_message_action_chat_migrate_to *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_migrate_to"));
+  json_object_set (res, "channel_id", json_integer (A->channel_id));
+  return res;
+}
+
+json_t *json_pack_action_chat_migrate_from (struct tdl_message_action_chat_migrate_from *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("chat_migrate_from"));
+  json_object_set (res, "group_id", json_integer (A->group_id));
+  json_object_set (res, "group_title", json_string (A->title));
+  return res;
+}
+
+json_t *json_pack_action_pin_message (struct tdl_message_action_pin_message *A) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("pin_message"));
+  json_object_set (res, "message", json_integer (A->message_id));
+  return res;
+}
+
+json_t *json_pack_content_action (union tdl_message_action *C) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("action"));
+  json_t *action = NULL;
+  switch (C->action) {
+  case tdl_message_action_type_group_create:
+    action = json_pack_action_group_create (&C->group_create);
+    break;
+  case tdl_message_action_type_channel_create:
+    action = json_pack_action_channel_create (&C->channel_create);
+    break;
+  case tdl_message_action_type_chat_change_title:
+    action = json_pack_action_chat_change_title (&C->change_title);
+    break;
+  case tdl_message_action_type_chat_change_photo:
+    action = json_pack_action_chat_change_photo (&C->change_photo);
+    break;
+  case tdl_message_action_type_chat_delete_photo:
+    action = json_pack_action_chat_delete_photo (&C->delete_photo);
+    break;
+  case tdl_message_action_type_chat_add_members:
+    action = json_pack_action_chat_add_members (&C->add_members);
+    break;
+  case tdl_message_action_type_chat_join_by_link:
+    action = json_pack_action_chat_join_by_link (&C->join_by_link);
+    break;
+  case tdl_message_action_type_chat_delete_member:
+    action = json_pack_action_chat_delete_member (&C->delete_member);
+    break;
+  case tdl_message_action_type_chat_migrate_to:
+    action = json_pack_action_chat_migrate_to (&C->migrate_to);
+    break;
+  case tdl_message_action_type_chat_migrate_from:
+    action = json_pack_action_chat_migrate_from (&C->migrate_from);
+    break;
+  case tdl_message_action_type_pin_message:
+    action = json_pack_action_pin_message (&C->pin_message);
+    break;
+  }
+  json_object_set (res, "action", action);
+  return res;
+}
+
+json_t *json_pack_content_deleted (struct tdl_message_content_deleted *C) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("deleted"));
+  return res;
+}
+
+json_t *json_pack_content_unsupported (struct tdl_message_content_unsupported *C) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("unsupported"));
+  return res;
+}
+
+json_t *json_pack_content (union tdl_message_content *C) {
+  switch (C->type) {
+  case tdl_message_content_type_text:
+    return json_pack_content_text (&C->text);
+  case tdl_message_content_type_media:
+    return json_pack_content_media (&C->media);
+  case tdl_message_content_type_venue:
+    return json_pack_content_venue (&C->venue);
+  case tdl_message_content_type_contact:
+    return json_pack_content_contact (&C->contact);
+  case tdl_message_content_type_action:
+    return json_pack_content_action (&C->action);
+  case tdl_message_content_type_deleted:
+    return json_pack_content_deleted (&C->deleted);
+  case tdl_message_content_type_unsupported:
+    return json_pack_content_unsupported (&C->unsupported);
+  }
+}
+
+json_t *json_pack_reply_markup (union tdl_reply_markup *M) {
+  json_t *res = json_object ();
+
+  if (M->type == tdl_reply_markup_type_hide_keyboard) {
+    json_object_set (res, "type", json_string ("hide"));
+    json_object_set (res, "personal", json_boolean (M->hide.personal));
+    return res;
+  }
+  if (M->type == tdl_reply_markup_type_force_reply) {
+    json_object_set (res, "type", json_string ("force_reply"));
+    json_object_set (res, "personal", json_boolean (M->force_reply.personal));
+    return res;
+  }
+  assert (M->type == tdl_reply_markup_type_show_keyboard);
+  json_object_set (res, "type", json_string ("show"));
+  json_object_set (res, "personal", json_boolean (M->show.personal));
+  json_object_set (res, "show", json_boolean (M->show.one_time));
+  json_object_set (res, "resize", json_boolean (M->show.resize_keyboard));
+  
+  json_t *arr = json_array ();
+  int i;
+  int p = 0;
+  for (i = 0; i < M->show.rows_cnt; i++) {
+    int j;
+    json_t *row = json_array ();
+    for (j = 0; j < M->show.rows[i]; j++) {
+      struct tdl_button *B = M->show.buttons[p ++];
+      json_t *b = json_object ();
+      switch (B->type) {
+      case tdl_button_type_text:
+        json_object_set (b, "type", json_string ("text"));
+        break;
+      case tdl_button_type_request_phone_number:
+        json_object_set (b, "type", json_string ("request_phone_number"));
+        break;
+      case tdl_button_type_request_location:
+        json_object_set (b, "type", json_string ("request_location"));
+        break;
+      }
+      if (B->text) {
+        json_object_set (b, "text", json_string (B->text));
+      }
+      json_array_append (row, b);
+    }
+    json_array_append (arr, row);
+  }
+  json_object_set (res, "buttons", arr);
+  return res;
+}
+
+json_t *json_pack_message (struct tdl_message *M) {
+  json_t *res = json_object ();
+  struct tdl_chat_info *C = tdlib_instant_get_chat (TLS, M->chat_id);
+  assert (C);
+  json_object_set (res, "id", json_pack_message_id (C->chat->type, C->chat->id, M->id));
+  if (M->sender_user_id) {
+    json_object_set (res, "sender_user_id", json_integer (M->sender_user_id));
+  }
+  json_object_set (res, "can_be_deleted", json_boolean (M->can_be_deleted));
+  json_object_set (res, "is_post", json_boolean (M->is_post));
+  json_object_set (res, "date", json_integer (M->date));
+  json_object_set (res, "edit_date", json_integer (M->edit_date));
+  if (M->forward_info) {
+    json_object_set (res, "forward_info", json_pack_forward_info (M->forward_info));
+  }
+  if (M->reply_to_message_id) {
+    json_object_set (res, "reply_to_message_id", json_integer (M->reply_to_message_id));
+  }
+  if (M->via_bot_user_id) {
+    json_object_set (res, "via_bot_user_id", json_integer (M->via_bot_user_id));
+  }
+  if (M->views) {
+    json_object_set (res, "views", json_integer (M->views));
+  }
  
-  if (tgl_get_peer_type (M->fwd_from_id)) {
-    assert (json_object_set (res, "fwd_from", json_pack_peer (M->fwd_from_id)) >= 0);
-    assert (json_object_set (res, "fwd_date", json_integer (M->fwd_date)) >= 0);
-  }
-
-  if (M->reply_id) {
-    tgl_message_id_t msg_id = M->permanent_id;
-    msg_id.id = M->reply_id;
-    
-    assert (json_object_set (res, "reply_id", json_string (print_permanent_msg_id (msg_id))) >= 0);
-  }
-
-  if (M->flags & TGLMF_MENTION) {
-    assert (json_object_set (res, "mention", json_true ()) >= 0);
-  }
- 
-  assert (json_object_set (res, "from", json_pack_peer (M->from_id)) >= 0);
-  assert (json_object_set (res, "to", json_pack_peer (M->to_id)) >= 0);
-  
-  assert (json_object_set (res, "out", json_boolean (M->flags & TGLMF_OUT)) >= 0);
-  assert (json_object_set (res, "unread", json_boolean (M->flags & TGLMF_UNREAD)) >= 0);
-  assert (json_object_set (res, "service", json_boolean (M->flags & TGLMF_SERVICE)) >= 0);
-  assert (json_object_set (res, "date", json_integer (M->date)) >= 0);
-  
-  if (!(M->flags & TGLMF_SERVICE)) {  
-    if (M->message_len && M->message) {
-      assert (json_object_set (res, "text", json_string (M->message)) >= 0);
-    }
-    if (M->media.type && M->media.type != tgl_message_media_none) {
-      assert (json_object_set (res, "media", json_pack_media (&M->media)) >= 0);
-    }
-  } else {
-    assert (json_object_set (res, "event", json_string ("service")) >= 0);
-    assert (json_object_set (res, "action", json_pack_service (M)) >= 0);
+  json_object_set (res, "content", json_pack_content (M->content));
+  if (M->reply_markup && M->reply_markup->type != tdl_reply_markup_type_none) {
+    json_object_set (res, "reply_markup", json_pack_reply_markup (M->reply_markup));
   }
   return res;
 }
 
-json_t *json_pack_read (struct tgl_message *M) {
-  json_t *res = json_pack_message (M);
-  assert (json_object_set (res, "event", json_string ("read")) >= 0);
-  //this will overwrite "event":"message" to "event":"read".
-  return res;
-}
-
-json_t *json_pack_user_status (struct tgl_user *U) {
+json_t *json_pack_bot_info (struct tdl_bot_info *B) {
   json_t *res = json_object ();
-  assert (json_object_set (res, "user",  json_pack_peer (U->id)) >= 0);
-  struct tgl_user_status *S = &U->status;
-  assert (json_object_set (res, "online", json_boolean (S->online == 1)) >= 0);
-  assert (json_object_set (res, "state", json_integer (S->online)) >= 0);
-  if (S->online > 0 || S->online == -1) {
-    static char s[20];
-    str_format_time(S->when, s);
-    assert (json_object_set (res, "when", json_string (s)) >= 0);
-  } else if (S->online == 0) {
-    assert (json_object_set(res, "when", json_string("long time ago")) >= 0);
-  } else if (S->online == -2) {
-    assert (json_object_set(res, "when", json_string("recently")) >= 0);
-  } else if (S->online == -3) {
-    assert (json_object_set(res, "when", json_string("last week")) >= 0);
-  } else if (S->online == -4) {
-    assert (json_object_set (res, "when", json_string ("last month")) >= 0);
+  if (B->description) {
+    json_object_set (res, "description", json_string (B->description));
   }
-  assert (json_object_set (res, "event", json_string ("online-status")) >= 0);
-  //this will overwrite "event":"message" to "event":"read".
+  if (B->commands_cnt) {
+    json_t *arr = json_array ();
+    int i;
+    for (i = 0; i < B->commands_cnt; i++) {
+      json_t *a = json_object ();
+      json_object_set (a, "command", json_string (B->commands[i]->command));
+      json_object_set (a, "description", json_string (B->commands[i]->description));
+    }
+    json_object_set (res, "commands", arr);
+  }
   return res;
 }
+
+json_t *json_pack_chat_member (struct tdl_chat_member *M) {
+  json_t *res = json_object ();
+  json_object_set (res, "user", json_pack_user (M->user));
+  json_object_set (res, "inviter_user_id", json_integer (M->inviter_user_id));
+  json_object_set (res, "join_date", json_integer (M->join_date));
+  switch (M->role) {
+  case tdl_chat_member_role_creator:
+    json_object_set (res, "role", json_string ("creator"));
+    break;
+  case tdl_chat_member_role_editor:
+    json_object_set (res, "role", json_string ("editor"));
+    break;
+  case tdl_chat_member_role_moderator:
+    json_object_set (res, "role", json_string ("moderator"));
+    break;
+  case tdl_chat_member_role_general:
+    json_object_set (res, "role", json_string ("general"));
+    break;
+  case tdl_chat_member_role_left:
+    json_object_set (res, "role", json_string ("left"));
+    break;
+  case tdl_chat_member_role_kicked:
+    json_object_set (res, "role", json_string ("kicked"));
+    break;
+  }
+  if (M->bot_info) {
+    json_object_set (res, "bot_info", json_pack_bot_info (M->bot_info));
+  }
+  return res;
+}
+
+json_t *json_pack_chat (struct tdl_chat_info *C) {
+  json_t *res = json_object ();
+
+  json_object_set (res, "id", json_integer (C->id));
+  json_object_set (res, "title", json_string (C->title));
+  if (C->photo) {
+    json_t *a = json_object ();
+    if (C->photo->big) {
+      json_object_set (a, "big", json_pack_file (C->photo->big));
+    }
+    if (C->photo->small) {
+      json_object_set (a, "small", json_pack_file (C->photo->small));
+    }
+    json_object_set (res, "photo", a);
+  }
+  json_object_set (res, "order", json_integer (C->order));
+  json_object_set (res, "unread_count", json_integer (C->unread_count));
+  json_object_set (res, "last_read_inbox_message_id", json_integer (C->last_read_inbox_message_id));
+  json_object_set (res, "last_read_outbox_message_id", json_integer (C->last_read_outbox_message_id));
+  json_object_set (res, "reply_markup_message_id", json_integer (C->reply_markup_message_id));
+  if (C->notification_settings) {
+    json_t *a = json_object ();
+    json_object_set (a, "mute_for", json_integer (C->notification_settings->mute_for));
+    json_object_set (a, "sound", json_string (C->notification_settings->sound)); 
+    json_object_set (a, "show_preview", json_integer (C->notification_settings->show_preview));
+    json_object_set (res, "notification_settings", a);
+  }
+
+  switch (C->chat->type) {
+  case tdl_chat_type_user:
+    json_object_set (res, "type", json_pack_user (&C->chat->user));
+    break;
+  case tdl_chat_type_group:
+    json_object_set (res, "type", json_pack_group (&C->chat->group));
+    break;
+  case tdl_chat_type_channel:
+    json_object_set (res, "type", json_pack_channel (&C->chat->channel));
+    break;
+  case tdl_chat_type_secret_chat:
+    json_object_set (res, "type", json_pack_secret_chat (&C->chat->secret_chat));
+    break;
+  }
+  return res;
+}
+
+json_t *json_pack_link_state (enum tdl_user_link_state link) {
+  switch (link) {
+  case tdl_user_link_state_knows_phone_number:
+    return json_string ("knows_phone");
+  case tdl_user_link_state_contact:
+    return json_string ("contact");
+  default:
+    return json_string ("none");
+  }
+}
+
+json_t *json_pack_user (struct tdl_user *U) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("user"));
+  json_object_set (res, "id", json_integer (U->id));
+  if (U->first_name) {
+    json_object_set (res, "first_name", json_string (U->first_name));
+  }
+  if (U->last_name) {
+    json_object_set (res, "last_name", json_string (U->last_name));
+  }
+  if (U->username) {
+    json_object_set (res, "username", json_string (U->username));
+  }
+  if (U->phone_number) {
+    json_object_set (res, "phone_number", json_string (U->phone_number));
+  }
+  if (U->status && U->status->type != tdl_user_status_empty) {
+    switch (U->status->type) {
+    case tdl_user_status_empty:
+      break;
+    case tdl_user_status_online:
+      json_object_set (res, "status", json_string ("online"));
+      json_object_set (res, "expire", json_integer (U->status->when));
+      break;
+    case tdl_user_status_offline:
+      json_object_set (res, "status", json_string ("offline"));
+      json_object_set (res, "when", json_integer (U->status->when));
+      break;
+    case tdl_user_status_recently:
+      json_object_set (res, "status", json_string ("recently"));
+      break;
+    case tdl_user_status_last_week:
+      json_object_set (res, "status", json_string ("last_week"));
+      break;
+    case tdl_user_status_last_month:
+      json_object_set (res, "status", json_string ("last_month"));
+      break;
+    }
+  }
+  if (U->photo) {
+    json_t *a = json_object ();
+    json_object_set (a, "id", json_integer (U->photo->id));
+    if (U->photo->big) {
+      json_object_set (a, "big", json_pack_file (U->photo->big));
+    }
+    if (U->photo->small) {
+      json_object_set (a, "small", json_pack_file (U->photo->small));
+    }
+
+    json_object_set (res, "photo", a);
+  }
+  json_object_set (res, "my_link", json_pack_link_state (U->my_link));
+  json_object_set (res, "foreign_link", json_pack_link_state (U->foreign_link));
+  json_object_set (res, "is_verified", json_boolean (U->is_verified));
+  if (U->restriction_reason) {
+    json_object_set (res, "restriction_reason", json_string (U->restriction_reason));
+  }
+  json_object_set (res, "have_access", json_boolean (U->have_access));
+  json_object_set (res, "deleted", json_boolean (U->deleted));
+
+  if (U->bot_type) {
+    json_t *a = json_object ();
+    json_object_set (a, "can_join_group_chats", json_boolean (U->bot_type->can_join_group_chats));
+    json_object_set (a, "can_read_all_group_chat_messages", json_boolean (U->bot_type->can_read_all_group_chat_messages));
+    json_object_set (a, "is_inline", json_boolean (U->bot_type->is_inline));
+    if (U->bot_type->inline_query_placeholder) {
+      json_object_set (a, "inline_query_placeholder", json_string (U->bot_type->inline_query_placeholder));
+    }
+    json_object_set (res, "bot_type", a);
+  }
+
+  if (U->full && !U->full->need_update) {
+    json_object_set (res, "is_blocked", json_boolean (U->full->is_blocked));
+    if (U->full->about) {
+      json_object_set (res, "about", json_string (U->full->about));
+    }
+    if (U->full->bot_info) {
+      json_object_set (res, "bot_info", json_pack_bot_info (U->full->bot_info));
+    }
+  }
+
+  return res;
+}
+
+json_t *json_pack_read (struct tdl_message *M) {
+  return json_object ();
+}
+
+json_t *json_pack_group (struct tdl_group *G) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("group"));
+  json_object_set (res, "id", json_integer (G->id));
+  json_object_set (res, "members_count", json_integer (G->members_count));
+  switch (G->role) {
+  case tdl_chat_member_role_creator:
+    json_object_set (res, "role", json_string ("creator"));
+    break;
+  case tdl_chat_member_role_editor:
+    json_object_set (res, "role", json_string ("editor"));
+    break;
+  case tdl_chat_member_role_moderator:
+    json_object_set (res, "role", json_string ("moderator"));
+    break;
+  case tdl_chat_member_role_general:
+    json_object_set (res, "role", json_string ("general"));
+    break;
+  case tdl_chat_member_role_left:
+    json_object_set (res, "role", json_string ("left"));
+    break;
+  case tdl_chat_member_role_kicked:
+    json_object_set (res, "role", json_string ("kicked"));
+    break;
+  }
+  json_object_set (res, "anyone_can_edit", json_boolean (G->anyone_can_edit));
+  json_object_set (res, "is_active", json_boolean (G->is_active));
+  json_object_set (res, "migrated_to_channel_id", json_integer (G->migrated_to_channel_id));
+
+  if (G->full && !G->full->need_update) {
+    if (G->full->invite_link) {
+      json_object_set (res, "invite_link", json_string (G->full->invite_link));
+    }
+    json_object_set (res, "creator_user_id", json_integer (G->full->creator_user_id));
+
+    json_t *arr = json_array ();
+    int i;
+    for (i = 0; i < G->full->members_cnt; i++) {
+      json_array_append (arr, json_pack_chat_member (G->full->members[i]));
+    }
+    json_object_set (res, "members", arr);
+  }
+  return res;
+}
+
+json_t *json_pack_channel (struct tdl_channel *Ch) {
+  json_t *res = json_object ();
+  json_object_set (res, "type", json_string ("channel"));
+  json_object_set (res, "id", json_integer (Ch->id));
+  if (Ch->username) {
+    json_object_set (res, "username", json_string (Ch->username));
+  }
+  if (Ch->date) {
+    json_object_set (res, "date", json_integer (Ch->date));
+  }
+  switch (Ch->role) {
+  case tdl_chat_member_role_creator:
+    json_object_set (res, "role", json_string ("creator"));
+    break;
+  case tdl_chat_member_role_editor:
+    json_object_set (res, "role", json_string ("editor"));
+    break;
+  case tdl_chat_member_role_moderator:
+    json_object_set (res, "role", json_string ("moderator"));
+    break;
+  case tdl_chat_member_role_general:
+    json_object_set (res, "role", json_string ("general"));
+    break;
+  case tdl_chat_member_role_left:
+    json_object_set (res, "role", json_string ("left"));
+    break;
+  case tdl_chat_member_role_kicked:
+    json_object_set (res, "role", json_string ("kicked"));
+    break;
+  }
+
+  json_object_set (res, "anyone_can_invite", json_boolean (Ch->anyone_can_invite));
+  json_object_set (res, "sign_messages", json_boolean (Ch->sign_messages));
+  json_object_set (res, "is_broadcast", json_boolean (Ch->is_broadcast));
+  json_object_set (res, "is_supergroup", json_boolean (Ch->is_supergroup));
+  json_object_set (res, "is_verified", json_boolean (Ch->is_verified));
+
+  if (Ch->restriction_reason) {
+    json_object_set (res, "restriction_reason", json_string (Ch->restriction_reason));
+  }
+  
+  if (Ch->full && !Ch->full->need_update ) {
+    if (Ch->full->about) {
+      json_object_set (res, "about", json_string (Ch->full->about));
+    }
+    json_object_set (res, "members_cnt", json_integer (Ch->full->members_cnt));
+    json_object_set (res, "admins_cnt", json_integer (Ch->full->admins_cnt));
+    json_object_set (res, "kicked_cnt", json_integer (Ch->full->kicked_cnt));
+    json_object_set (res, "can_get_members", json_boolean (Ch->full->can_get_members));
+    json_object_set (res, "can_set_username", json_boolean (Ch->full->can_set_username));
+    if (Ch->full->invite_link) {
+      json_object_set (res, "invite_link", json_string (Ch->full->invite_link));
+    }
+    if (Ch->full->migrated_from_group_id) {
+      json_object_set (res, "migrated_from_group_id", json_integer (Ch->full->migrated_from_group_id));
+      json_object_set (res, "migrated_from_max_message_id", json_integer (Ch->full->migrated_from_max_message_id));
+    }
+  }
+  return res;
+}
+
+json_t *json_pack_secret_chat (struct tdl_secret_chat *SC) {
+  return json_object ();
+}
+
 
 #endif

@@ -17,6 +17,8 @@
     Copyright Vitaly Valtman 2013-2015
 */
 
+#define USE_JSON
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -2302,7 +2304,7 @@ void print_fail (struct in_command *cmd) {
     assert (json_object_set (res, "error_code", json_integer (TLS->error_code)) >= 0);
     assert (json_object_set (res, "error", json_string (TLS->error)) >= 0);
     char *s = json_dumps (res, 0);
-    mprintf (ev, "%s\n", s);
+    mprintf (cmd->ev, "%s\n", s);
     json_decref (res);
     free (s);
   #endif
@@ -2336,7 +2338,7 @@ void fail_interface (struct tdlib_state *TLS, struct in_command *cmd, int error_
     assert (json_object_set (res, "error_code", json_integer (error_code)) >= 0);
     assert (json_object_set (res, "error", json_string (error)) >= 0);
     char *s = json_dumps (res, 0);
-    mprintf (ev, "%s\n", s);
+    mprintf (cmd->ev, "%s\n", s);
     json_decref (res);
     free (s);
   #endif
@@ -2355,9 +2357,12 @@ void print_success (struct in_command *cmd) {
     } else {
       #ifdef USE_JSON
         json_t *res = json_object ();
+        if (cmd->query_id) {
+          assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+        }
         assert (json_object_set (res, "result", json_string ("SUCCESS")) >= 0);
         char *s = json_dumps (res, 0);
-        mprintf (ev, "%s\n", s);
+        mprintf (cmd->ev, "%s\n", s);
         json_decref (res);
         free (s);
       #endif
@@ -2403,14 +2408,19 @@ void print_msg_list_gw (struct tdlib_state *TLSR, void *extra, int success, int 
     }
   } else {
     #ifdef USE_JSON
-      json_t *res = json_array ();
+      json_t *res = json_object ();
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
+      json_t *arr = json_array ();
       int i;
       for (i = num - 1; i >= 0; i--) {
         json_t *a = json_pack_message (ML[i]);
-        assert (json_array_append (res, a) >= 0);        
+        assert (json_array_append (arr, a) >= 0);        
       }
+      assert (json_object_set (res, "result", arr) >= 0);
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2440,9 +2450,13 @@ void print_msg_gw (struct tdlib_state *TLSR, void *extra, int success, struct td
     print_message (cmd->ev, M);
   } else {
     #ifdef USE_JSON
-      json_t *res = json_pack_message (M);
+      json_t *res = json_object ();
+      json_object_set (res, "result", json_pack_message (M));
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2485,6 +2499,28 @@ void print_invite_link_gw (struct tdlib_state *TLSR, void *extra, int success, s
     mpop_color (cmd->ev);
     mprintf (cmd->ev, "\n");
   } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
+      json_t *a = json_object ();
+      if (info->is_group) {
+        assert (json_object_set (a, "type", json_string ("group")) >= 0);
+      } else if (info->is_supergroup_channel) {
+        assert (json_object_set (a, "type", json_string ("supergroup")) >= 0);
+      } else {
+        assert (json_object_set (a, "type", json_string ("channel")) >= 0);
+      }
+      assert (json_object_set (a, "title", json_string (info->title)) >= 0);
+
+      json_object_set (res, "result", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (cmd->ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
   mprint_end (cmd->ev);
   in_command_decref (cmd);
@@ -2510,14 +2546,19 @@ void print_user_list_gw (struct tdlib_state *TLSR, void *extra, int success, int
     }
   } else {
     #ifdef USE_JSON
-      json_t *res = json_array ();
+      json_t *res = json_object ();
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
+      json_t *arr = json_array ();
       int i;
       for (i = num - 1; i >= 0; i--) {
-        json_t *a = json_pack_peer (UL[i]->id);
-        assert (json_array_append (res, a) >= 0);
+        json_t *a = json_pack_user (UL[i]);
+        assert (json_array_append (arr, a) >= 0);
       }
+      json_object_set (res, "result", arr);
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2547,14 +2588,19 @@ void print_chat_members_gw (struct tdlib_state *TLSR, void *extra, int success, 
     mpop_color (cmd->ev);
   } else {
     #ifdef USE_JSON
-      json_t *res = json_array ();
+      json_t *res = json_object ();
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
+      json_t *arr = json_array ();
       int i;
       for (i = num - 1; i >= 0; i--) {
-        json_t *a = json_pack_peer (UL[i]->id);
-        assert (json_array_append (res, a) >= 0);
+        json_t *a = json_pack_chat_member (UL[i]);
+        assert (json_array_append (arr, a) >= 0);
       }
+      json_object_set (res, "result", arr);
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2568,13 +2614,27 @@ void print_chat_gw (struct tdlib_state *TLSR, void *extra, int success, struct t
   
   struct in_command *cmd = extra;
   if (!success) { print_fail (cmd); return; }
-  
+ 
   mprint_start (cmd->ev);
-  if (cmd->query_id) {
-    mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+  if (!enable_json) {
+    if (cmd->query_id) {
+      mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+    }
+    print_chat_name (cmd->ev, C, C->id);
+    mprintf (cmd->ev, "\n");
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_object_set (res, "result", json_pack_chat (C));
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
+      char *s = json_dumps (res, 0);
+      mprintf (cmd->ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
-  print_chat_name (cmd->ev, C, C->id);
-  mprintf (cmd->ev, "\n");
   mprint_end (cmd->ev);
 
   in_command_decref (cmd);
@@ -2595,9 +2655,13 @@ void print_user_gw (struct tdlib_state *TLSR, void *extra, int success, struct t
     mprintf (cmd->ev, "\n");
   } else {
     #ifdef USE_JSON
-      json_t *res = json_pack_peer (U->id);
+      json_t *res = json_object ();
+      json_object_set (res, "result", json_pack_user (U));
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2626,9 +2690,13 @@ void print_channel_gw (struct tdlib_state *TLSR, void *extra, int success, struc
     mprintf (cmd->ev, "\n");
   } else {
     #ifdef USE_JSON
-      json_t *res = json_pack_peer (U->id);
+      json_t *res = json_object ();
+      json_object_set (res, "result", json_pack_channel (C));
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2652,10 +2720,13 @@ void print_filename_gw (struct tdlib_state *TLSR, void *extra, int success, cons
   } else {
     #ifdef USE_JSON
       json_t *res = json_object ();
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       assert (json_object_set (res, "result", json_string (name)) >= 0);
-      assert (json_object_set (res, "event", json_string ("download")) >= 0);
+      //assert (json_object_set (res, "event", json_string ("download")) >= 0);
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2681,9 +2752,12 @@ void print_string_gw (struct tdlib_state *TLSR, void *extra, int success, const 
   } else {
     #ifdef USE_JSON
       json_t *res = json_object ();
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       assert (json_object_set (res, "result", json_string (name)) >= 0);
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2783,9 +2857,13 @@ void print_group_info_gw (struct tdlib_state *TLSR, void *extra, int success, st
     mpop_color (cmd->ev);
   } else {
     #ifdef USE_JSON
-      json_t *res = json_pack_peer (C->id);
+      json_t *res = json_object ();
+      json_object_set (res, "result", json_pack_group (C));
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2852,9 +2930,13 @@ void print_channel_info_gw (struct tdlib_state *TLSR, void *extra, int success, 
     mpop_color (cmd->ev);
   } else {
     #ifdef USE_JSON
-      json_t *res = json_pack_peer (C->id);
+      json_t *res = json_object ();
+      json_object_set (res, "result", json_pack_channel (C));
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2919,9 +3001,13 @@ void print_user_info_gw (struct tdlib_state *TLSR, void *extra, int success, str
     mpop_color (cmd->ev);
   } else {
     #ifdef USE_JSON
-      json_t *res = json_pack_peer (U->id);
+      json_t *res = json_object ();
+      json_object_set (res, "result", json_pack_user (U));
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -2951,14 +3037,19 @@ void print_dialog_list_gw (struct tdlib_state *TLSR, void *extra, int success, i
     mpop_color (cmd->ev);
   } else {
     #ifdef USE_JSON
-      json_t *res = json_array ();
+      json_t *res = json_object ();
+      if (cmd->query_id) {
+        assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+      }
+      json_t *arr = json_array ();
       int i;
       for (i = size - 1; i >= 0; i--) {
-        json_t *a = json_pack_peer (peers[i]);
-        assert (json_array_append (res, a) >= 0);
+        json_t *a = json_pack_chat (chats[i]);
+        assert (json_array_append (arr, a) >= 0);
       }
+      json_object_set (res, "result", arr);
       char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
+      mprintf (cmd->ev, "%s\n", s);
       json_decref (res);
       free (s);
     #endif
@@ -3047,7 +3138,12 @@ void on_new_msg (struct tdlib_state *TLSR, struct tdl_message *M, int disable_no
     print_message (ev, M);
   } else {
     #ifdef USE_JSON
-      json_t *res = json_pack_message (M);
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("new_message"));
+      json_object_set (a, "message", json_pack_message (M));
+      json_object_set (res, "update", a);
+
       char *s = json_dumps (res, 0);
       mprintf (ev, "%s\n", s);
       json_decref (res);
@@ -3209,14 +3305,28 @@ void on_user_update (struct tdlib_state *TLSR, struct tdl_user *U) {
 
   if (disable_output && !notify_ev) { return; }
 
-  if (!creat) {
-    mprint_start (ev);
-    mpush_color (ev, COLOR_YELLOW);
-    mprintf (ev, "User ");
-    print_user_name (ev, U, U->id);
-    mprintf (ev, " updated\n");
-    mpop_color (ev);
-    mprint_end (ev);
+  if (!enable_json) {
+    if (!creat) {
+      mprint_start (ev);
+      mpush_color (ev, COLOR_YELLOW);
+      mprintf (ev, "User ");
+      print_user_name (ev, U, U->id);
+      mprintf (ev, " updated\n");
+      mpop_color (ev);
+      mprint_end (ev);
+    }
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("user"));
+      json_object_set (a, "user", json_pack_user (U));
+      json_object_set (res, "update", a);
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
 }
 
@@ -3244,16 +3354,30 @@ void on_group_update (struct tdlib_state *TLSR, struct tdl_group *G) {
   }
 
   if (disable_output && !notify_ev) { return; }
-  
-  if (!creat && e->owner != G) {
-    mprint_start (ev);
-    mpush_color (ev, COLOR_YELLOW);
-    mprintf (ev, "Group ");
-    struct tdl_chat_info *C = e->owner;
-    print_chat_name (ev, C, C->id);
-    mprintf (ev, " updated\n");
-    mpop_color (ev);
-    mprint_end (ev);
+ 
+  if (!enable_json) {
+    if (!creat && e->owner != G) {
+      mprint_start (ev);
+      mpush_color (ev, COLOR_YELLOW);
+      mprintf (ev, "Group ");
+      struct tdl_chat_info *C = e->owner;
+      print_chat_name (ev, C, C->id);
+      mprintf (ev, " updated\n");
+      mpop_color (ev);
+      mprint_end (ev);
+    }
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("group"));
+      json_object_set (a, "group", json_pack_group (G));
+      json_object_set (res, "update", a);
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
 }
 
@@ -3287,15 +3411,30 @@ void on_channel_update (struct tdlib_state *TLSR, struct tdl_channel *Ch) {
 
   if (disable_output && !notify_ev) { return; }
   
-  if (!creat && e->owner != Ch) {
-    mprint_start (ev);
-    mpush_color (ev, COLOR_YELLOW);
-    mprintf (ev, "Channel ");
-    struct tdl_chat_info *C = e->owner;
-    print_chat_name (ev, C, C->id);
-    mprintf (ev, " updated\n");
-    mpop_color (ev);
-    mprint_end (ev);
+  if (!enable_json) {
+    if (!creat && e->owner != Ch) {
+      mprint_start (ev);
+      mpush_color (ev, COLOR_YELLOW);
+      mprintf (ev, "Channel ");
+      struct tdl_chat_info *C = e->owner;
+      print_chat_name (ev, C, C->id);
+      mprintf (ev, " updated\n");
+      mpop_color (ev);
+      mprint_end (ev);
+    }
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("channel"));
+      json_object_set (a, "channel", json_pack_channel (Ch));
+      json_object_set (res, "update", a);
+      
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
 }
 
@@ -3348,15 +3487,30 @@ void on_chat_update (struct tdlib_state *TLSR, struct tdl_chat_info *C) {
   
   struct in_ev *ev = notify_ev;
   if (disable_output && !notify_ev) { return; }
-  
-  if (!creat) {
-    mprint_start (ev);
-    mpush_color (ev, COLOR_YELLOW);
-    mprintf (ev, "Peer ");
-    print_chat_name (ev, C, C->id);
-    mprintf (ev, " updated\n");
-    mpop_color (ev);
-    mprint_end (ev);
+ 
+  if (!enable_json) {
+    if (!creat) {
+      mprint_start (ev);
+      mpush_color (ev, COLOR_YELLOW);
+      mprintf (ev, "Peer ");
+      print_chat_name (ev, C, C->id);
+      mprintf (ev, " updated\n");
+      mpop_color (ev);
+      mprint_end (ev);
+    }
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("chat"));
+      json_object_set (a, "chat", json_pack_chat (C));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
 }
 
@@ -3384,48 +3538,102 @@ void on_type_notification(struct tdlib_state *TLS, struct tdl_chat_info *C, stru
   if (log_level < 2 || (disable_output && !notify_ev)) { return; }
 
   mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-  print_date (notify_ev, time (0));
-  print_user_name (ev, U, U->id);
-  if (C->chat != (union tdl_chat *)U) {
-    mprintf (ev, " in ");
-    print_chat_name (ev, C, C->id);
+  if (!enable_json) {
+    mpush_color (ev, COLOR_YELLOW);
+    print_date (notify_ev, time (0));
+    print_user_name (ev, U, U->id);
+    if (C->chat != (union tdl_chat *)U) {
+      mprintf (ev, " in ");
+      print_chat_name (ev, C, C->id);
+    }
+    mprintf (ev, " ");
+    switch (action->type) {
+      case tdl_message_typing_action_typing:
+        mprintf (ev, "is typing");
+        break;
+      case tdl_message_typing_action_cancel:
+        mprintf (ev, "deleted typed message");
+        break;
+      case tdl_message_typing_action_record_video:
+        mprintf (ev, "is recording video");
+        break;
+      case tdl_message_typing_action_upload_video:
+        mprintf (ev, "is uploading video: %d%%", action->upload.progress);
+        break;
+      case tdl_message_typing_action_record_voice:
+        mprintf (ev, "is recording voice message");
+        break;
+      case tdl_message_typing_action_upload_voice:
+        mprintf (ev, "is uploading voice message: %d%%", action->upload.progress);
+        break;
+      case tdl_message_typing_action_upload_photo:
+        mprintf (ev, "is uploading photo: %d%%", action->upload.progress);
+        break;
+      case tdl_message_typing_action_upload_document:
+        mprintf (ev, "is uploading document: %d%%", action->upload.progress);
+        break;
+      case tdl_message_typing_action_send_location:
+        mprintf (ev, "is choosing geo location: %d%%", action->upload.progress);
+        break;
+      case tdl_message_typing_action_choose_contact:
+        mprintf (ev, "is choosing contact: %d%%", action->upload.progress);
+        break;
+    }
+    mprintf (ev, "\n");
+    mpop_color (ev);
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("typing"));
+      json_object_set (a, "user", json_pack_user (U));
+      json_object_set (a, "chat", json_pack_chat (C));
+      json_object_set (res, "update", a);
+
+      switch (action->type) {
+        case tdl_message_typing_action_typing:
+          json_object_set (a, "action", json_string ("typing"));
+          break;
+        case tdl_message_typing_action_cancel:
+          json_object_set (a, "action", json_string ("cancel"));
+          break;
+        case tdl_message_typing_action_record_video:
+          json_object_set (a, "action", json_string ("record_video"));
+          break;
+        case tdl_message_typing_action_upload_video:
+          json_object_set (a, "action", json_string ("upload_video"));
+          json_object_set (a, "progress", json_integer (action->upload.progress));
+          break;
+        case tdl_message_typing_action_record_voice:
+          json_object_set (a, "action", json_string ("record_voice"));
+          break;
+        case tdl_message_typing_action_upload_voice:
+          json_object_set (a, "action", json_string ("upload_voice"));
+          json_object_set (a, "progress", json_integer (action->upload.progress));
+          break;
+        case tdl_message_typing_action_upload_photo:
+          json_object_set (a, "action", json_string ("upload_photo"));
+          json_object_set (a, "progress", json_integer (action->upload.progress));
+          break;
+        case tdl_message_typing_action_upload_document:
+          json_object_set (a, "action", json_string ("upload_document"));
+          json_object_set (a, "progress", json_integer (action->upload.progress));
+          break;
+        case tdl_message_typing_action_send_location:
+          json_object_set (a, "action", json_string ("location"));
+          break;
+        case tdl_message_typing_action_choose_contact:
+          json_object_set (a, "action", json_string ("contact"));
+          break;
+      }
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
-  mprintf (ev, " ");
-  switch (action->type) {
-  case tdl_message_typing_action_typing:
-    mprintf (ev, "is typing");
-    break;
-  case tdl_message_typing_action_cancel:
-    mprintf (ev, "deleted typed message");
-    break;
-  case tdl_message_typing_action_record_video:
-    mprintf (ev, "is recording video");
-    break;
-  case tdl_message_typing_action_upload_video:
-    mprintf (ev, "is uploading video: %d%%", action->upload.progress);
-    break;
-  case tdl_message_typing_action_record_voice:
-    mprintf (ev, "is recording voice message");
-    break;
-  case tdl_message_typing_action_upload_voice:
-    mprintf (ev, "is uploading voice message: %d%%", action->upload.progress);
-    break;
-  case tdl_message_typing_action_upload_photo:
-    mprintf (ev, "is uploading photo: %d%%", action->upload.progress);
-    break;
-  case tdl_message_typing_action_upload_document:
-    mprintf (ev, "is uploading document: %d%%", action->upload.progress);
-    break;
-  case tdl_message_typing_action_send_location:
-    mprintf (ev, "is choosing geo location: %d%%", action->upload.progress);
-    break;
-  case tdl_message_typing_action_choose_contact:
-    mprintf (ev, "is choosing contact: %d%%", action->upload.progress);
-    break;
-  }
-  mprintf (ev, "\n");
-  mpop_color (ev);
   mprint_end (ev);
 }
   
@@ -3437,10 +3645,27 @@ void on_new_authorization (struct tdlib_state *TLS, int date, const char *device
   if (disable_output && !notify_ev) { return; }
 
   mprint_start (ev);
-  mpush_color (ev, COLOR_REDB);
-  print_date (notify_ev, time (0));
-  mprintf (ev, "New authorization: device '%s' location '%s'\n", device, location);
-  mpop_color (ev);
+  if (!enable_json) {
+    mpush_color (ev, COLOR_REDB);
+    print_date (notify_ev, time (0));
+    mprintf (ev, "New authorization: device '%s' location '%s'\n", device, location);
+    mpop_color (ev);
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("new_authorization"));
+      json_object_set (a, "date", json_integer (date));
+      json_object_set (a, "device", json_string (device));
+      json_object_set (a, "location", json_string (location));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
+  }
   mprint_end (ev);
 }
 
@@ -3455,14 +3680,29 @@ void on_user_status_update (struct tdlib_state *TLS, struct tdl_user *U) {
   if (log_level < 3 || (disable_output && !notify_ev)) { return; }
 
   mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
- 
-  print_date (notify_ev, time (0));
-  print_user_name (ev, U, U->id);
-  mprintf (ev, " is now ");
-  print_user_status (ev, U->status);
-  mprintf (ev, "\n");
-  mpop_color (ev);
+  if (!enable_json) {
+    mpush_color (ev, COLOR_YELLOW);
+
+    print_date (notify_ev, time (0));
+    print_user_name (ev, U, U->id);
+    mprintf (ev, " is now ");
+    print_user_status (ev, U->status);
+    mprintf (ev, "\n");
+    mpop_color (ev);
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("user_status"));
+      json_object_set (a, "user", json_pack_user (U));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
+  }
   mprint_end (ev);
 }
 
@@ -3472,14 +3712,35 @@ void on_messages_deleted (struct tdlib_state *TLS, struct tdl_chat_info *C, int 
   #endif
   struct in_ev *ev = notify_ev;
   if (disable_output && !notify_ev) { return; }
-
+  
   mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-  print_date (notify_ev, time (0));
-  mprintf (ev, "Deleted %d messages from ", cnt);
-  print_chat_name (ev, C, C->id);
-  mprintf (ev, "\n");
-  mpop_color (ev);
+  if (!enable_json) {
+    mpush_color (ev, COLOR_YELLOW);
+    print_date (notify_ev, time (0));
+    mprintf (ev, "Deleted %d messages from ", cnt);
+    print_chat_name (ev, C, C->id);
+    mprintf (ev, "\n");
+    mpop_color (ev);
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("deleted_messages"));
+      json_t *arr = json_array ();
+      int i;
+      for (i = 0; i < cnt; i++) {
+        json_array_append (arr, json_integer (ids[i]));
+      }
+      json_object_set (a, "ids", arr);
+      json_object_set (a, "chat", json_pack_chat (C));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
+  }
   mprint_end (ev);
 }
 
@@ -3513,6 +3774,21 @@ void on_updated_chat_title (struct tdlib_state *TLS, struct tdl_chat_info *C) {
   u = generate_alias_title (e, C->title);
   sub_alias_internal (e, e->name_alias, u);
   upd_str (&e->name_alias, u);
+
+  if (enable_json) {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("chat_rename"));
+      json_object_set (a, "chat", json_pack_chat (C));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
+  }
 }
   
 void on_updated_chat_photo (struct tdlib_state *TLS, struct tdl_chat_info *C) {
@@ -3523,18 +3799,34 @@ void on_updated_chat_photo (struct tdlib_state *TLS, struct tdl_chat_info *C) {
   if (disable_output && !notify_ev) { return; }
 
   mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-  
-  print_date (notify_ev, time (0));
-  mprintf (ev, "Chat ");
-  print_chat_name (ev, C, C->id);
-  if (C->photo->big->id > 0) {
-    mprintf (ev, " updated photo");
+
+  if (!enable_json) {
+    mpush_color (ev, COLOR_YELLOW);
+
+    print_date (notify_ev, time (0));
+    mprintf (ev, "Chat ");
+    print_chat_name (ev, C, C->id);
+    if (C->photo->big->id > 0) {
+      mprintf (ev, " updated photo");
+    } else {
+      mprintf (ev, " deleted photo");
+    }
+    mprintf (ev, "\n");
+    mpop_color (ev);
   } else {
-    mprintf (ev, " deleted photo");
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("chat_change_photo"));
+      json_object_set (a, "chat", json_pack_chat (C));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
   }
-  mprintf (ev, "\n");
-  mpop_color (ev);
   mprint_end (ev);
 }
 
@@ -3547,14 +3839,30 @@ void on_marked_read_inbox (struct tdlib_state *TLS, struct tdl_chat_info *C) {
   if (log_level < 1) { return; }
 
   mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-  
-  print_date (notify_ev, time (0));
-  mprintf (ev, "Chat ");
-  print_chat_name (ev, C, C->id);
-  mprintf (ev, ": read inbox");
-  mprintf (ev, "\n");
-  mpop_color (ev);
+
+  if (!enable_json) {
+    mpush_color (ev, COLOR_YELLOW);
+
+    print_date (notify_ev, time (0));
+    mprintf (ev, "Chat ");
+    print_chat_name (ev, C, C->id);
+    mprintf (ev, ": read inbox");
+    mprintf (ev, "\n");
+    mpop_color (ev);
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("chat_read_inbox"));
+      json_object_set (a, "chat", json_pack_chat (C));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
+  }
   mprint_end (ev);
   
   struct telegram_cli_chat_extra *e = C->extra;
@@ -3570,16 +3878,31 @@ void on_marked_read_outbox (struct tdlib_state *TLS, struct tdl_chat_info *C) {
   if (disable_output && !notify_ev) { return; }
   if (log_level < 1) { return; }
 
-  mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-  print_date (notify_ev, time (0));
-  
-  mprintf (ev, "Chat ");
-  print_chat_name (ev, C, C->id);
-  mprintf (ev, ": read outbox");
-  mprintf (ev, "\n");
+  if (!enable_json) {
+    mprint_start (ev);
+    mpush_color (ev, COLOR_YELLOW);
+    print_date (notify_ev, time (0));
 
-  mpop_color (ev);
+    mprintf (ev, "Chat ");
+    print_chat_name (ev, C, C->id);
+    mprintf (ev, ": read outbox");
+    mprintf (ev, "\n");
+
+    mpop_color (ev);
+  } else {
+    #ifdef USE_JSON
+      json_t *res = json_object ();
+      json_t *a = json_object ();
+      json_object_set (a, "type", json_string ("chat_read_outbox"));
+      json_object_set (a, "chat", json_pack_chat (C));
+      json_object_set (res, "update", a);
+
+      char *s = json_dumps (res, 0);
+      mprintf (notify_ev, "%s\n", s);
+      json_decref (res);
+      free (s);
+    #endif
+  }
   mprint_end (ev);
 }
 

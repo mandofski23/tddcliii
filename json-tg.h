@@ -1,14 +1,15 @@
 #ifndef __JSON_TG_H__
 #define __JSON_TG_H__
-#include "config.h"
 #ifdef USE_JSON
 #include <jansson.h>
-#include <tgl/tgl.h>
-#include <tgl/tgl-layout.h>
-json_t *json_pack_message (struct tgl_message *M);
-json_t *json_pack_updates (unsigned flags);
-json_t *json_pack_peer (tgl_peer_id_t id);
-json_t *json_pack_read (struct tgl_message *M);
-json_t *json_pack_user_status (struct tgl_user *U);
+
+json_t *json_pack_message (struct tdl_message *M);
+json_t *json_pack_chat_member (struct tdl_chat_member *M);
+json_t *json_pack_chat (struct tdl_chat_info *C);
+json_t *json_pack_read (struct tdl_message *M);
+json_t *json_pack_user (struct tdl_user *U);
+json_t *json_pack_group (struct tdl_group *G);
+json_t *json_pack_channel (struct tdl_channel *Ch);
+json_t *json_pack_secret_chat (struct tdl_secret_chat *SC);
 #endif
 #endif

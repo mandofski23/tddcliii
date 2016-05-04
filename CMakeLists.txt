@@ -44,5 +44,7 @@ set (TDCLI_SOURCE
 )
 
 
-add_executable (tdcli ${TDCLI_SOURCE})
-target_link_libraries (tdcli tdlibc ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${READLINE_LIBRARY} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} -lpthread )
+add_executable (telegram-cli ${TDCLI_SOURCE})
+target_link_libraries (telegram-cli tdlibc ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${READLINE_LIBRARY} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} -lpthread )
+install (TARGETS telegram-cli
+    RUNTIME DESTINATION bin)
