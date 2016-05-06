@@ -5027,7 +5027,7 @@ void print_message_action (struct in_ev *ev, union tdl_message_action *action) {
     mprintf (ev, "deleted photo");
     break;
   case tdl_message_action_type_chat_add_members:
-    mprintf (ev, "added");
+    mprintf (ev, "added ");
     print_members (ev, action->add_members.members_cnt, 
       action->add_members.members);
     break;
