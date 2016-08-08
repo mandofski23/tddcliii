@@ -1713,8 +1713,6 @@ struct command commands[MAX_COMMANDS_SIZE] = {
 
   {"resolve_username", {ca_string, ca_none}, do_resolve_username, "resolve_username <username> - find chat by username", NULL, {}},
   
-  {"post_reply", {ca_msg_id, ca_msg_string_end, ca_none}, do_msg, "msg <msg-id> <text>\tSends text message to peer", NULL, {1, 1}},
-  
   {"reply", {ca_msg_id, ca_msg_string_end, ca_none}, do_msg, "msg <msg-id> <text>\tSends text message to peer", NULL, {1}},
   {"reply_animation", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_animation <peer> <file>\tSends animation to peer", NULL, {1, tdl_media_animation}},
   {"reply_audio", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_audio <peer> <file>\tSends audio to peer", NULL, {1, tdl_media_audio}},
