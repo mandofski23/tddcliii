@@ -123,6 +123,12 @@ json_t *json_pack_entity (union tdl_message_entity *E) {
     json_object_set (res, "offset", json_integer (E->simple.offset));
     json_object_set (res, "length", json_integer (E->simple.length));
     break;
+  case tdl_message_entity_name:
+    json_object_set (res, "type", json_string ("name"));
+    json_object_set (res, "offset", json_integer (E->name.offset));
+    json_object_set (res, "length", json_integer (E->name.length));
+    json_object_set (res, "user_id", json_integer (E->name.user_id));
+    break;
   case tdl_message_entity_pre_code:
     json_object_set (res, "type", json_string ("pre_code"));
     json_object_set (res, "offset", json_integer (E->pre_code.offset));
@@ -701,7 +707,7 @@ json_t *json_pack_bot_info (struct tdl_bot_info *B) {
 
 json_t *json_pack_chat_member (struct tdl_chat_member *M) {
   json_t *res = json_object ();
-  json_object_set (res, "user", json_pack_user (M->user));
+  json_object_set (res, "user_id", json_integer (M->user_id));
   json_object_set (res, "inviter_user_id", json_integer (M->inviter_user_id));
   json_object_set (res, "join_date", json_integer (M->join_date));
   switch (M->role) {

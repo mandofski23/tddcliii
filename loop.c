@@ -371,10 +371,28 @@ void on_got_password (struct tdlib_state *TLS, const char *password, void *extra
   tdlib_check_auth_password (TLS, on_got_auth_state, extra, password);
 }
 
+void on_got_code (struct tdlib_state *TLS, const char *code, void *extra) {
+  void **arr = extra;
+  
+  tdlib_check_auth_code (TLS, on_got_auth_state, arr[0], code, arr[1], arr[2]);
+
+  if (arr[1]) {
+    free (arr[1]);
+  }
+  if (arr[2]) {
+    free (arr[2]);
+  }
+  free (arr);
+}
+
 void on_got_last_name (struct tdlib_state *TLS, const char *last_name, void *extra) {
   void **arr = extra;
-  tdlib_set_auth_name (TLS, on_got_auth_state, arr[0], arr[1], last_name);
-  free (arr);
+  
+  arr[2] = strdup (last_name);
+    
+  one_string_cb_arg = arr;
+  one_string_cb = on_got_code;
+  do_get_string (TLS, "code: ", 0);
 }
 
 void on_got_first_name (struct tdlib_state *TLS, const char *first_name, void *extra) {
@@ -387,12 +405,8 @@ void on_got_first_name (struct tdlib_state *TLS, const char *first_name, void *e
 }
 
 
-void on_got_code (struct tdlib_state *TLS, const char *code, void *extra) {
-  tdlib_check_auth_code (TLS, on_got_auth_state, extra, code);
-}
-
 void on_got_phone (struct tdlib_state *TLS, const char *phone, void *extra) {
-  tdlib_set_auth_phone (TLS, on_got_auth_state, extra, phone);
+  tdlib_set_auth_phone (TLS, on_got_auth_state, extra, phone, 0, 0);
 }
 
 void on_got_unknown_cb (evutil_socket_t fd, short what, void *arg) {
@@ -425,13 +439,14 @@ void on_got_auth_state (struct tdlib_state *TLS, void *extra, int success, union
     }
     break;
   case tdl_auth_state_wait_code:
-    one_string_cb_arg = extra;
-    one_string_cb = on_got_code;
-    do_get_string (TLS, "code: ", 0);
-    break;
-  case tdl_auth_state_wait_name:
-    {
-      void **arr = malloc (sizeof (void *) * 2);
+    if (state->wait_code.is_registered) {
+      void **arr = calloc (sizeof (void *), 3);
+      arr[0] = extra;
+      one_string_cb_arg = arr;
+      one_string_cb = on_got_code;
+      do_get_string (TLS, "code: ", 0);
+    } else {
+      void **arr = calloc (sizeof (void *), 3);
       arr[0] = extra;
       one_string_cb_arg = arr;
       one_string_cb = on_got_first_name;

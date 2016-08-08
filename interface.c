@@ -1041,15 +1041,15 @@ void do_msg (struct command *command, int arg_num, struct arg args[], struct in_
   cmd->refcnt ++;
   
   long long chat_id;
-  if (command->params[1]) {
+  if (command->params[0]) {
     chat_id = args[0].msg_id.chat_id;
     reply_id = args[0].msg_id.message_id;
   } else {
     chat_id = args[0].chat->id;
   }
  
-  union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, args[1].str, do_html ? 1 : 0, disable_msg_preview);
-  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, (int)command->params[0], 0, 0, NULL, content);
+  union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, args[1].str, do_html ? 1 : 0, disable_msg_preview, 1);
+  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_send_file (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1057,7 +1057,7 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
   cmd->refcnt ++;
   
   long long chat_id;
-  if (command->params[1]) {
+  if (command->params[0]) {
     chat_id = args[0].msg_id.chat_id;
     reply_id = args[0].msg_id.message_id;
   } else {
@@ -1065,8 +1065,8 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
   }
 
   union tdl_input_file *f = tdlib_create_input_file_local (TLS, args[1].str);
-  union tdl_input_message_content *content = tdlib_create_input_message_content_media (TLS, (int)command->params[2], 0, 0, 0, NULL, arg_num == 2 ? NULL : args[2].str, NULL, NULL, 0, f);
-  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, (int)command->params[0], 0, 0, NULL, content);
+  union tdl_input_message_content *content = tdlib_create_input_message_content_media (TLS, (int)command->params[1], 0, 0, 0, NULL, arg_num == 2 ? NULL : args[2].str, NULL, NULL, 0, f);
+  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_send_location (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1074,7 +1074,7 @@ void do_send_location (struct command *command, int arg_num, struct arg args[], 
   cmd->refcnt ++;
   
   long long chat_id;
-  if (command->params[1]) {
+  if (command->params[0]) {
     chat_id = args[0].msg_id.chat_id;
     reply_id = args[0].msg_id.message_id;
   } else {
@@ -1082,7 +1082,7 @@ void do_send_location (struct command *command, int arg_num, struct arg args[], 
   }
 
   union tdl_input_message_content *content = tdlib_create_input_message_content_venue (TLS, args[1].dval, args[2].dval, NULL, NULL, NULL, NULL);
-  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, (int)command->params[0], 0, 0, NULL, content);
+  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_send_contact (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1090,15 +1090,15 @@ void do_send_contact (struct command *command, int arg_num, struct arg args[], s
   cmd->refcnt ++;
   
   long long chat_id;
-  if (command->params[1]) {
-    chat_id = args[0].msg_id.chat_id;
+  if (command->params[0]) {
+    chat_id = args[0].msg_id.chat_id;    
     reply_id = args[0].msg_id.message_id;
   } else {
     chat_id = args[0].chat->id;
   }
 
   union tdl_input_message_content *content = tdlib_create_input_message_content_contact (TLS,  args[1].str, args[2].str, args[3].str, 0);
-  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, (int)command->params[0], 0, 0, NULL, content);
+  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1107,7 +1107,7 @@ void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_
   cmd->refcnt ++;
   
   long long chat_id;
-  if (command->params[1]) {
+  if (command->params[0]) {
     chat_id = args[0].msg_id.chat_id;
     reply_id = args[0].msg_id.message_id;
   } else {
@@ -1115,7 +1115,7 @@ void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_
   }
   
   union tdl_input_message_content *content = tdlib_create_input_message_content_forward (TLS, args[1].msg_id.chat_id, args[1].msg_id.message_id);
-  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, (int)command->params[0], 0, 0, NULL, content);
+  tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 /* }}} */
@@ -1328,15 +1328,15 @@ void do_channel_edit (struct command *command, int arg_num, struct arg args[], s
   
   cmd->refcnt ++;
 
-  if (!strcmp (args[1].str, "comments")) {
+  /*if (!strcmp (args[1].str, "comments")) {
     tdlib_toggle_channel_comments (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, mode);
-  } else if (!strcmp (args[1].str, "invites")) {
+  } else */if (!strcmp (args[1].str, "invites")) {
     tdlib_toggle_channel_invites (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, mode);
   } else if (!strcmp (args[1].str, "sign")) {
     tdlib_toggle_channel_sign_messages (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, mode);
   } else {
     in_command_decref (cmd);
-    fail_interface (TLS, cmd, EINVAL, "comments/invites/sign expected as second argument");
+    fail_interface (TLS, cmd, EINVAL, "invites/sign expected as second argument");
     return;
   }
 }
@@ -1666,7 +1666,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"channel_get_members", {ca_channel, ca_number | ca_optional, ca_number | ca_optional, ca_none}, do_channel_get_members, "channel_get_members <channel> [limit=100] [offset=0]\tGets channel recent members", NULL, {tdl_channel_members_filter_recent}},
   {"channel_change_about", {ca_channel, ca_string_end, ca_none}, do_channel_change_about, "channel_change_about <channel> <about>\tChanges channel about info.", NULL, {}},
   {"channel_change_username", {ca_channel, ca_string, ca_none}, do_channel_change_username, "channel_change_username <channel> <username>\tChanges channel username", NULL, {}},
-  {"channel_edit", {ca_channel, ca_string, ca_string}, do_channel_edit, "channel_edit <channel> <comments|invites|sign> <on|off> - changes value of basic channel parameters", NULL, {}}, 
+  {"channel_edit", {ca_channel, ca_string, ca_string}, do_channel_edit, "channel_edit <channel> <invites|sign> <on|off> - changes value of basic channel parameters", NULL, {}}, 
   
   {"chat_add_user", {ca_chat, ca_user, ca_number | ca_optional, ca_none}, do_chat_add_user, "chat_add_user <chat> <user> [msgs-to-forward]\tAdds user to chat. Sends him last msgs-to-forward message (only for group chats) from this chat. Default 0", NULL, {}},
   {"chat_change_photo", {ca_chat, ca_file_name_end, ca_none}, do_chat_change_photo, "chat_change_photo <chat> <filename>\tChanges chat photo. Photo will be cropped to square", NULL, {}},
@@ -1708,62 +1708,40 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   
   {"main_session", {ca_none}, do_main_session, "main_session\tSends updates to this connection (or terminal). Useful only with listening socket", NULL, {}},
   {"mark_read", {ca_chat, ca_none}, do_mark_read, "mark_read <chat>\tMarks messages with peer as read", NULL, {}},
-  {"msg", {ca_chat, ca_msg_string_end, ca_none}, do_msg, "msg <peer> <text>\tSends text message to peer", NULL, {0, 0}},
+  {"msg", {ca_chat, ca_msg_string_end, ca_none}, do_msg, "msg <peer> <text>\tSends text message to peer", NULL, {0}},
   
-  {"post", {ca_chat, ca_msg_string_end, ca_none}, do_msg, "post <peer> <text>\tSends text message to peer as admin", NULL, {1, 0}},
-  {"post_animation", {ca_chat, ca_file_name, ca_none}, do_send_file, "post_animation <peer> <file>\tposts animation to peer", NULL, {1, 0, tdl_media_animation}},
-  {"post_audio", {ca_chat, ca_file_name, ca_none}, do_send_file, "post_audio <peer> <file>\tposts audio to peer", NULL, {1, 0, tdl_media_audio}},
-  {"post_document", {ca_chat, ca_file_name, ca_none}, do_send_file, "post_document <peer> <file>\tPosts document to peer", NULL, {1, 0, tdl_media_document}},
-  {"post_fwd", {ca_chat, ca_msg_id, ca_none}, do_fwd, "fwd <peer> <msg-id>\tForwards message to peer. Forward to secret chats is forbidden", NULL, {1, 0}},
-  {"post_location", {ca_chat, ca_double, ca_double, ca_none}, do_send_location, "post_location <peer> <latitude> <longitude>\tSends geo location", NULL, {1, 0}},
-  {"post_photo", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "post_photo <peer> <file> [caption]\tSends photo to peer", NULL, {1, 0, tdl_media_photo}},
-  {"post_sticker", {ca_chat, ca_file_name, ca_none}, do_send_file, "post_sticker <peer> <file>\tposts sticker to peer", NULL, {1, 0, tdl_media_sticker}},
-  //{"post_text", {ca_chat, ca_file_name_end, ca_none}, do_post_text, "post_text <peer> <file>\tSends contents of text file as plain text message", NULL, {1, 0}},
-  {"post_video", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "post_video <peer> <file> [caption]\tSends video to peer", NULL, {1, 0, tdl_media_video}},
-  {"post_voice", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "post_voice <peer> <file> [caption]\tSends voice to peer", NULL, {1, 0, tdl_media_voice}},
 
   {"resolve_username", {ca_string, ca_none}, do_resolve_username, "resolve_username <username> - find chat by username", NULL, {}},
   
   {"post_reply", {ca_msg_id, ca_msg_string_end, ca_none}, do_msg, "msg <msg-id> <text>\tSends text message to peer", NULL, {1, 1}},
-  {"post_reply_animation", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_animation <peer> <file>\tSends animation to peer", NULL, {1, 1, tdl_media_animation}},
-  {"post_reply_audio", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_audio <peer> <file>\tSends audio to peer", NULL, {1, 1, tdl_media_audio}},
-  //{"post_reply_contact", {ca_msg_id, ca_string, ca_string, ca_string, ca_none}, do_send_contact, "send_contact <peer> <phone> <first-name> <last-name>\tSends contact (not necessary telegram user)", NULL, {1, 1}},
-  {"post_reply_document", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_document <peer> <file>\tSends document to peer", NULL, {1, 1, tdl_media_document}},
-  {"post_reply_fwd", {ca_msg_id, ca_msg_id, ca_none}, do_fwd, "reply_fwd <msg-id> <msg-id>\tForwards message to peer. Forward to secret chats is forbidden", NULL, {1, 1}},
-  {"post_reply_location", {ca_msg_id, ca_double, ca_double, ca_none}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {1, 1}},  
-  {"post_reply_photo", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_photo <peer> <file> [caption]\tSends photo to peer", NULL, {1, 1, tdl_media_photo}},
-  {"post_reply_sticker", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_sticker <peer> <file> [caption]\tSends sticker to peer", NULL, {1, 1, tdl_media_sticker}},
-  //{"post_reply_text", {ca_msg_id, ca_file_name_end, ca_none}, do_send_text, "send_text <peer> <file>\tSends contents of text file as plain text message", NULL, {1, 1}},
-  {"post_reply_video", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_video <peer> <file> [caption]\tSends video to peer", NULL, {1, 1, tdl_media_video}},  
-  {"post_reply_voice", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_voice <peer> <file> [caption]\tsends voice to peer", NULL, {1, 1, tdl_media_voice}},
   
-  {"reply", {ca_msg_id, ca_msg_string_end, ca_none}, do_msg, "msg <msg-id> <text>\tSends text message to peer", NULL, {0, 1}},
-  {"reply_animation", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_animation <peer> <file>\tSends animation to peer", NULL, {0, 1, tdl_media_animation}},
-  {"reply_audio", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_audio <peer> <file>\tSends audio to peer", NULL, {0, 1, tdl_media_audio}},
+  {"reply", {ca_msg_id, ca_msg_string_end, ca_none}, do_msg, "msg <msg-id> <text>\tSends text message to peer", NULL, {1}},
+  {"reply_animation", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_animation <peer> <file>\tSends animation to peer", NULL, {1, tdl_media_animation}},
+  {"reply_audio", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_audio <peer> <file>\tSends audio to peer", NULL, {1, tdl_media_audio}},
   //{"reply_contact", {ca_msg_id, ca_string, ca_string, ca_string, ca_none}, do_send_contact, "send_contact <peer> <phone> <first-name> <last-name>\tSends contact (not necessary telegram user)", NULL, {0, 1}},
-  {"reply_document", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_document <peer> <file>\tSends document to peer", NULL, {0, 1, tdl_media_document}},
-  {"reply_fwd", {ca_msg_id, ca_msg_id, ca_none}, do_fwd, "reply_fwd <msg-id> <msg-id>\tForwards message to peer. Forward to secret chats is forbidden", NULL, {0, 1}},
-  {"reply_location", {ca_msg_id, ca_double, ca_double, ca_none}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {0, 1}},  
-  {"reply_photo", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_photo <peer> <file> [caption]\tSends photo to peer", NULL, {0, 1, tdl_media_photo}},
-  {"reply_sticker", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_sticker <peer> <file> [caption]\tSends sticker to peer", NULL, {0, 1, tdl_media_sticker}},
+  {"reply_document", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_document <peer> <file>\tSends document to peer", NULL, {1, tdl_media_document}},
+  {"reply_fwd", {ca_msg_id, ca_msg_id, ca_none}, do_fwd, "reply_fwd <msg-id> <msg-id>\tForwards message to peer. Forward to secret chats is forbidden", NULL, {1}},
+  {"reply_location", {ca_msg_id, ca_double, ca_double, ca_none}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {1}},  
+  {"reply_photo", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_photo <peer> <file> [caption]\tSends photo to peer", NULL, {1, tdl_media_photo}},
+  {"reply_sticker", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_sticker <peer> <file> [caption]\tSends sticker to peer", NULL, {1, tdl_media_sticker}},
   //{"reply_text", {ca_msg_id, ca_file_name_end, ca_none}, do_send_text, "send_text <peer> <file>\tSends contents of text file as plain text message", NULL, {0, 1}},
-  {"reply_video", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_video <peer> <file> [caption]\tSends video to peer", NULL, {0, 1, tdl_media_video}},  
-  {"reply_voice", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_voice <peer> <file> [caption]\tsends voice to peer", NULL, {0, 1, tdl_media_voice}},
+  {"reply_video", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_video <peer> <file> [caption]\tSends video to peer", NULL, {1, tdl_media_video}},  
+  {"reply_voice", {ca_msg_id, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_voice <peer> <file> [caption]\tsends voice to peer", NULL, {1, tdl_media_voice}},
   
   {"search", {ca_chat | ca_optional, ca_number | ca_optional, ca_number | ca_optional, ca_number | ca_optional, ca_number | ca_optional, ca_string_end}, do_search, "search [peer] [limit] [from] [to] [offset] pattern\tSearch for pattern in messages from date from to date to (unixtime) in messages with peer (if peer not present, in all messages)", NULL, {}},
   
-  {"send_animation", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_animation <peer> <file>\tSends animation to peer", NULL, {0, 0, tdl_media_animation}},
-  {"send_audio", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_audio <peer> <file>\tSends audio to peer", NULL, {0, 0, tdl_media_audio}},
+  {"send_animation", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_animation <peer> <file>\tSends animation to peer", NULL, {0, tdl_media_animation}},
+  {"send_audio", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_audio <peer> <file>\tSends audio to peer", NULL, {0, tdl_media_audio}},
   //{"send_contact", {ca_chat, ca_string, ca_string, ca_string, ca_none}, do_send_contact, "send_contact <peer> <phone> <first-name> <last-name>\tSends contact (not necessary telegram user)", NULL, {0, 0}},
-  {"send_document", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_document <peer> <file>\tSends document to peer", NULL, {0, 0, tdl_media_document}},
+  {"send_document", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_document <peer> <file>\tSends document to peer", NULL, {0, tdl_media_document}},
 //  {"send_file", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_file <peer> <file>\tSends document to peer", NULL, {},
-  {"send_location", {ca_chat, ca_double, ca_double, ca_none}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {0, 0}},
-  {"send_photo", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_photo <peer> <file> [caption]\tSends photo to peer", NULL, {0, 0, tdl_media_photo}},
-  {"send_sticker", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_sticker <peer> <file> [caption]\tSends sticker to peer", NULL, {0, 0, tdl_media_sticker}},
+  {"send_location", {ca_chat, ca_double, ca_double, ca_none}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {0}},
+  {"send_photo", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_photo <peer> <file> [caption]\tSends photo to peer", NULL, {0, tdl_media_photo}},
+  {"send_sticker", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_sticker <peer> <file> [caption]\tSends sticker to peer", NULL, {0, tdl_media_sticker}},
   //{"send_text", {ca_chat, ca_file_name_end, ca_none}, do_send_text, "send_text <peer> <file>\tSends contents of text file as plain text message", NULL, {0, 0}},
   {"send_typing", {ca_chat, ca_string | ca_optional, ca_number | ca_optional, ca_none}, do_send_typing, "send_typing <chat> [typing|cancel|record_video|upload_video|record_voice|upload_voice|upload_photo|upload_document|choose_location|choose_contact] [progress]\tSends typing notification.", NULL, {}},
-  {"send_video", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_video <peer> <file> [caption]\tSends video to peer", NULL, {0, 0, tdl_media_video}},
-  {"send_voice", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_voice <peer> <file> [caption]\tsends voice to peer", NULL, {0, 0, tdl_media_voice}},
+  {"send_video", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_video <peer> <file> [caption]\tSends video to peer", NULL, {0, tdl_media_video}},
+  {"send_voice", {ca_chat, ca_file_name, ca_string_end | ca_optional, ca_none}, do_send_file, "send_voice <peer> <file> [caption]\tsends voice to peer", NULL, {0, tdl_media_voice}},
   
   {"show_license", {ca_none}, do_show_license, "show_license\tPrints contents of GPL license", NULL, {}},
   
@@ -2804,7 +2782,10 @@ void print_member (struct in_ev *ev, struct tdl_chat_member *U) {
       mprintf (ev, "Kicked    ");
       break;
   }
-  print_user_name (ev, U->user, U->user->id);
+
+
+  struct tdl_user *Us = tdlib_instant_get_user (TLS, U->user_id);
+  print_user_name (ev, Us, U->user_id);
   mprintf (ev, " invited by ");
   struct tdl_user *I = tdlib_instant_get_user (TLS, U->inviter_user_id);
   print_user_name (ev, I, U->inviter_user_id);
@@ -3089,8 +3070,8 @@ void interpreter_chat_mode (struct in_command *cmd) {
 
     tdlib_view_messages (TLS, print_success_gw, NULL, cmd->chat_mode_chat->id, 1, &cmd->chat_mode_chat->top_message->id);
     
-    union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, line, 0, disable_msg_preview);
-    tdlib_send_message (TLS, print_msg_success_gw, cmd, cmd->chat_mode_chat->id, reply_id, 0, 0, 0, NULL, content);
+    union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, line, 0, disable_msg_preview, 1);
+    tdlib_send_message (TLS, print_msg_success_gw, cmd, cmd->chat_mode_chat->id, reply_id, 0, 0, NULL, content);
   }
 }
 
@@ -3744,7 +3725,7 @@ void on_messages_deleted (struct tdlib_state *TLS, struct tdl_chat_info *C, int 
 
 void on_reply_markup_updated (struct tdlib_state *TLS, struct tdl_chat_info *C) {}
   
-void on_message_sent (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_message *M, int old_message_id, int date) {
+void on_message_sent (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_message *M, int old_message_id) {
   #ifdef USE_LUA
     lua_message_sent (C, M, old_message_id, date);
   #endif
@@ -3758,6 +3739,7 @@ void on_updated_message_content(struct tdlib_state *TLS, struct tdl_chat_info *C
 void on_updated_message_views(struct tdlib_state *TLS, struct tdl_chat_info *C, int message_id, int views) {}
   
 void on_updated_chat_top_message(struct tdlib_state *TLS, struct tdl_chat_info *C) {}
+void on_updated_chat_order(struct tdlib_state *TLS, struct tdl_chat_info *C) {}
   
 void on_updated_chat_title (struct tdlib_state *TLS, struct tdl_chat_info *C) {
   #ifdef USE_LUA
@@ -3949,6 +3931,7 @@ struct tgl_update_callback upd_cb = {
   .updated_message_content = on_updated_message_content,
   .updated_message_views = on_updated_message_views,
   .updated_chat_top_message = on_updated_chat_top_message,
+  .updated_chat_order = on_updated_chat_order,
   .updated_chat_title = on_updated_chat_title,
   .updated_chat_photo = on_updated_chat_photo,
   .marked_read_inbox = on_marked_read_inbox,
