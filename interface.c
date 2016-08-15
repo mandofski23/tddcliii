@@ -917,8 +917,45 @@ void do_help (struct command *command, int arg_num, struct arg args[], struct in
   int total = 0;
   mpush_color (cmd->ev, COLOR_YELLOW);
   struct command *cmd_it = commands;
+  
+  int max_len = 0;
+  while (cmd_it->name) {  
+    if (!args[0].str || !strcmp (args[0].str, cmd_it->name)) {
+      int len = (int)strlen (cmd_it->name);
+      
+      struct command_argument_desc *D = cmd_it->args;
+      while (D->type) {
+        int period = D->type & ca_period;
+        len += 3 + (int)strlen (D->name) + (period ? 4 : 0);
+        D ++;
+      }
+
+      if (len > max_len) {
+        max_len = len;
+      }
+    }
+    cmd_it ++;
+  }
+
+  max_len ++;
+  
+  cmd_it = commands;
   while (cmd_it->name) {
     if (!args[0].str || !strcmp (args[0].str, cmd_it->name)) {
+      mprintf (cmd->ev, "%s", cmd_it->name);
+      int len = (int)strlen (cmd_it->name);
+      struct command_argument_desc *D = cmd_it->args;
+      while (D->type) {
+        int opt = D->type & ca_optional;
+        int period = D->type & ca_period;
+        mprintf (cmd->ev, " %s%s%s%s", opt ? "[" : "<", D->name, period ? " ..." : "", opt ? "]" : ">");
+        len += 3 + (int)strlen (D->name) + (period ? 4 : 0);
+        D ++;
+      }
+      while (len < max_len) {
+        len ++;
+        mprintf (cmd->ev, " ");
+      }
       mprintf (cmd->ev, "%s\n", cmd_it->desc);
       total ++;
     }
@@ -1682,93 +1719,88 @@ void do_clear (struct command *command, int arg_num, struct arg args[], struct i
 #define MAX_COMMANDS_SIZE 1000
 struct command commands[MAX_COMMANDS_SIZE] = {
   //{"accept_secret_chat", {ca_secret_chat, ca_none}, do_accept_secret_chat, "accept_secret_chat <secret chat>\tAccepts secret chat. Only useful with -E option", NULL},
-  {"account_change_username", {{"username", ca_string}}, do_change_username, "account_change_username <name>\tSets username.", NULL, {}},
-  {"account_change_name", {{"first_name", ca_string}, {"last_name", ca_string}}, do_change_profile_name, "account_change_name <first-name> <last-name>\tSets profile name.", NULL, {}},
-  {"account_change_photo", {{"file", ca_file_name_end}}, do_change_profile_photo, "account_change_photo <filename>\tSets profile photo. Photo will be cropped to square", NULL, {}},
+  {"account_change_username", {{"username", ca_string}}, do_change_username, "Sets profile username", NULL, {}},
+  {"account_change_name", {{"first_name", ca_string}, {"last_name", ca_string}}, do_change_profile_name, "Sets profile name", NULL, {}},
+  {"account_change_photo", {{"file", ca_file_name_end}}, do_change_profile_photo, "Sets profile photo. Photo will be cropped to square", NULL, {}},
 
-  {"add_contact", {{"phone", ca_string}, {"first_name", ca_string}, {"last_name", ca_string}}, do_add_contact, "add_contact <phone> <first name> <last name>\tTries to add user to contact list", NULL, {}},
-  {"block_user", {{"user", ca_user}}, do_block_user, "block_user <user>\tBlocks user", NULL, {}},
+  {"add_contact", {{"phone", ca_string}, {"first_name", ca_string}, {"last_name", ca_string}}, do_add_contact, "Tries to add user to contact list", NULL, {}},
+  {"block_user", {{"user", ca_user}}, do_block_user, "Blocks user", NULL, {}},
   //{"broadcast", {ca_user, ca_period, ca_string_end, ca_none}, do_broadcast, "broadcast <user>+ <text>\tSends text to several users at once", NULL},
   
-  {"channel_get_admins", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "channel_get_admins <channel> [limit=100] [offset=0]\tGets channel admins", NULL, {tdl_channel_members_filter_admins}},
-  {"channel_get_bots", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "channel_get_bots <channel> [limit=100] [offset=0]\tGets channel bot member", NULL, {tdl_channel_members_filter_bots}},
-  {"channel_get_kicked", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "channel_get_kicked <channel> [limit=100] [offset=0]\tGets channel kicked members", NULL, {tdl_channel_members_filter_kicked}},
+  {"channel_get_admins", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "Gets channel admins", NULL, {tdl_channel_members_filter_admins}},
+  {"channel_get_bots", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "Gets channel bots", NULL, {tdl_channel_members_filter_bots}},
+  {"channel_get_kicked", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "Gets channel kicked members", NULL, {tdl_channel_members_filter_kicked}},
   {"channel_get_members", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "channel_get_members <channel> [limit=100] [offset=0]\tGets channel recent members", NULL, {tdl_channel_members_filter_recent}},
-  {"channel_change_about", {{"channel", ca_channel}, {"about", ca_string_end}}, do_channel_change_about, "channel_change_about <channel> <about>\tChanges channel about info.", NULL, {}},
-  {"channel_change_username", {{"channel", ca_channel}, {"username", ca_string}}, do_channel_change_username, "channel_change_username <channel> <username>\tChanges channel username", NULL, {}},
-  {"channel_edit", {{"channel", ca_channel}, {"param", ca_string}, {"enabled", ca_string}}, do_channel_edit, "channel_edit <channel> <invites|sign> <on|off> - changes value of basic channel parameters", NULL, {}}, 
+  {"channel_change_about", {{"channel", ca_channel}, {"about", ca_string_end}}, do_channel_change_about, "Changes channel about info", NULL, {}},
+  {"channel_change_username", {{"channel", ca_channel}, {"username", ca_string}}, do_channel_change_username, "Changes channel username", NULL, {}},
+  {"channel_edit", {{"channel", ca_channel}, {"param", ca_string}, {"enabled", ca_string}}, do_channel_edit, "changes value of basic channel parameters. param=sign|invites. enabled=yes|no", NULL, {}}, 
   
-  {"chat_add_user", {{"chat", ca_chat}, {"user", ca_user}, {"msgs_to_forward", ca_number | ca_optional}}, do_chat_add_user, "chat_add_user <chat> <user> [msgs-to-forward]\tAdds user to chat. Sends him last msgs-to-forward message (only for group chats) from this chat. Default 0", NULL, {}},  
-  {"chat_change_photo", {{"chat", ca_chat}, {"file", ca_file_name_end}}, do_chat_change_photo, "chat_change_photo <chat> <filename>\tChanges chat photo. Photo will be cropped to square", NULL, {}},
-  {"chat_change_title", {{"chat", ca_chat}, {"title", ca_string_end}}, do_chat_change_title, "chat_change_title <chat> <new name>\tRenames chat", NULL, {}},
-  {"chat_change_role", {{"chat", ca_chat}, {"user", ca_user}, {"role", ca_string}}, do_chat_change_role, "chat_change_role <chat> <user> <creator|moderator|editor|general|kicked> - changes user's role in chat", NULL, {}},
-  {"chat_del_user", {{"chat", ca_chat}, {"user", ca_user}}, do_chat_del_user, "chat_del_user <chat> <user>\tDeletes user from chat", NULL, {}},
-  {"chat_info", {{"chat", ca_chat}}, do_chat_info, "chat_info <chat>\tPrints info about chat", NULL, {}},
-  {"chat_join", {{"chat", ca_chat}}, do_chat_join, "chat_join <channel>\tJoins to chat", NULL, {}},
-  {"chat_leave", {{"chat", ca_chat}}, do_chat_leave, "chat_leave <chat>\tLeaves from chat", NULL, {}},
-  {"chat_check_invite_link", {{"link", ca_string}}, do_chat_check_link, "chat_check_invite_link <link> - print info about chat by link", NULL, {}}, 
-  {"chat_create_broadcast", {{"title", ca_string}, {"about", ca_string}}, do_channel_create, "chat_create_broadcast <title> <about> - creates broadcast channel", NULL, {1, 0}},
-  {"chat_create_group", {{"title", ca_string}, {"members", ca_user | ca_optional | ca_period}}, do_group_create, "chat_create_group <title> <user>+ - creates group chat. Should include at least one user", NULL, {}},
-  {"chat_create_supergroup", {{"title", ca_string}, {"about", ca_string}}, do_channel_create, "chat_create_supergroup <title> <about> - creates supergroup channel", NULL, {0, 1}},
-  {"chat_export_invite_link", {{"chat", ca_chat}}, do_chat_export_link, "chat_export_invite_link <title> - exports new invite link (and invalidates previous)", NULL, {}}, 
-  {"chat_import_invite_link", {{"link", ca_string}}, do_chat_import_link, "chat_get_invite_link <link> - get chat by invite link and joins if possible", NULL, {}}, 
+  {"chat_add_user", {{"chat", ca_chat}, {"user", ca_user}, {"msgs_to_forward", ca_number | ca_optional}}, do_chat_add_user, "Adds user to chat. Sends him last msgs_to_forward messages (only for group chats) from this chat", NULL, {}},  
+  {"chat_change_photo", {{"chat", ca_chat}, {"file", ca_file_name_end}}, do_chat_change_photo, "Changes chat photo. Photo will be cropped to square", NULL, {}},
+  {"chat_change_title", {{"chat", ca_chat}, {"title", ca_string_end}}, do_chat_change_title, "Renames chat", NULL, {}},
+  {"chat_change_role", {{"chat", ca_chat}, {"user", ca_user}, {"role", ca_string}}, do_chat_change_role, "changes user's role in chat. role=creator|moderator|editor|general|kicked", NULL, {}},
+  {"chat_del_user", {{"chat", ca_chat}, {"user", ca_user}}, do_chat_del_user, "Deletes user from chat", NULL, {}},
+  {"chat_info", {{"chat", ca_chat}}, do_chat_info, "Prints info about chat", NULL, {}},
+  {"chat_join", {{"chat", ca_chat}}, do_chat_join, "Joins to chat", NULL, {}},
+  {"chat_leave", {{"chat", ca_chat}}, do_chat_leave, "Leaves chat", NULL, {}},
+  {"chat_check_invite_link", {{"link", ca_string}}, do_chat_check_link, "Print info about chat by link", NULL, {}}, 
+  {"chat_create_broadcast", {{"title", ca_string}, {"about", ca_string}}, do_channel_create, "Creates broadcast channel", NULL, {1, 0}},
+  {"chat_create_group", {{"title", ca_string}, {"members", ca_user | ca_optional | ca_period}}, do_group_create, "Creates group chat", NULL, {}},
+  {"chat_create_supergroup", {{"title", ca_string}, {"about", ca_string}}, do_channel_create, "Creates supergroup channel", NULL, {0, 1}},
+  {"chat_export_invite_link", {{"chat", ca_chat}}, do_chat_export_link, "Exports new invite link (and invalidates previous)", NULL, {}}, 
+  {"chat_import_invite_link", {{"link", ca_string}}, do_chat_import_link, "Get chat by invite link and joins if possible", NULL, {}}, 
   
-  {"chat_with_peer", {{"chat", ca_chat}}, do_chat_with_peer, "chat_with_peer <peer>\tInterface option. All input will be treated as messages to this peer. Type /quit to end this mode", NULL, {}},
+  {"chat_with_peer", {{"chat", ca_chat}}, do_chat_with_peer, "Interface option. All input will be treated as messages to this peer. Type /quit to end this mode", NULL, {}},
   
-  {"contact_list", {}, do_contact_list, "contact_list\tPrints contact list", NULL, {}},
-  {"contact_delete", {{"user", ca_user}}, do_contact_delete, "contact_delete <user>\tDeletes user from contact list", NULL, {}},
+  {"contact_list", {}, do_contact_list, "Prints contact list", NULL, {}},
+  {"contact_delete", {{"user", ca_user}}, do_contact_delete, "Deletes user from contact list", NULL, {}},
 
-  {"delete_msg", {{"msg_id", ca_msg_id}}, do_delete_msg, "delete_msg <msg-id>\tDeletes message", NULL, {}},
+  {"delete_msg", {{"msg_id", ca_msg_id}}, do_delete_msg, "Deletes message", NULL, {}},
 
-  {"dialog_list", {{"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_dialog_list, "dialog_list [limit=100] [offset=0]\tList of last conversations", NULL, {}},
+  {"dialog_list", {{"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_dialog_list, "List of last conversations", NULL, {}},
   
-  {"fwd", {{"chat", ca_chat}, {"msg_id", ca_msg_id}}, do_fwd, "fwd <peer> <msg-id>\tForwards message to peer. Forward to secret chats is forbidden", NULL, {0, 0}},
+  {"fwd", {{"chat", ca_chat}, {"msg_id", ca_msg_id}}, do_fwd, "Forwards message to peer. Forward to secret chats is forbidden", NULL, {0, 0}},
   
   //{"get_terms_of_service", {ca_none}, do_get_terms_of_service, "get_terms_of_service\tPrints telegram's terms of service", NULL},
   
-  {"get_message", {{"msg_id", ca_msg_id}}, do_get_message, "get_message <msg-id>\tGet message by id", NULL, {}},
+  {"get_message", {{"msg_id", ca_msg_id}}, do_get_message, "Get message by id", NULL, {}},
   //{"get_self", {ca_none}, do_get_self, "get_self \tGet our user info", NULL},
-  {"group_upgrade", {{"group", ca_group}}, do_group_upgrade, "group_upgrade <group>\tUpgrades group to supergroup", NULL, {}},
+  {"group_upgrade", {{"group", ca_group}}, do_group_upgrade, "Upgrades group to supergroup", NULL, {}},
   
-  {"help", {{"command", ca_command | ca_optional}}, do_help, "help [command]\tPrints this help", NULL, {}},
+  {"help", {{"command", ca_command | ca_optional}}, do_help, "Prints this help", NULL, {}},
   
-  {"history", {{"chat", ca_chat}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_history, "history <peer> [limit] [offset]\tPrints messages with this peer (most recent message lower). Also marks messages as read", NULL, {}},
+  {"history", {{"chat", ca_chat}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_history, "Prints messages with this peer. Also marks messages as read", NULL, {}},
   
-  {"load_file", {{"file_id", ca_number}}, do_load_file, "load_file <msg-id>\tDownloads file to downloads dirs. Prints file name after download end", NULL, {0}},
+  {"load_file", {{"file_id", ca_number}}, do_load_file, "Downloads file to downloads dirs. Prints file name after download end", NULL, {0}},
   
-  {"main_session", {}, do_main_session, "main_session\tSends updates to this connection (or terminal). Useful only with listening socket", NULL, {}},
-  {"mark_read", {{"chat", ca_chat}}, do_mark_read, "mark_read <chat>\tMarks messages with peer as read", NULL, {}},
-  {"msg", {{"chat", ca_chat}, {"text", ca_msg_string_end}}, do_msg, "msg <peer> <text>\tSends text message to peer", NULL, {0}},
+  {"main_session", {}, do_main_session, "Sends updates to this connection (or terminal). Useful only with listening socket", NULL, {}},
+  {"mark_read", {{"chat", ca_chat}}, do_mark_read, "Marks messages with peer as read", NULL, {}},
+  {"msg", {{"chat", ca_chat}, {"text", ca_msg_string_end}}, do_msg, "Sends text message to peer", NULL, {0}},
   
 
-  {"resolve_username", {{"username", ca_string}}, do_resolve_username, "resolve_username <username> - find chat by username", NULL, {}},
+  {"resolve_username", {{"username", ca_string}}, do_resolve_username, "Find chat by username", NULL, {}},
   
-  {"reply", {{"msg_id", ca_msg_id}, {"text", ca_msg_string_end}}, do_msg, "msg <msg-id> <text>\tSends text message to peer", NULL, {1}},  
-  {"reply_file", {{"msg_id", ca_msg_id}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, do_send_file, "reply_file <peer> [type] <file> [caption]\tSends animation to peer", NULL, {1}},
-  {"reply_fwd", {{"msg_id", ca_msg_id}, {"fwd_id", ca_msg_id}}, do_fwd, "reply_fwd <msg-id> <msg-id>\tForwards message to peer. Forward to secret chats is forbidden", NULL, {1}},
+  {"reply", {{"msg_id", ca_msg_id}, {"text", ca_msg_string_end}}, do_msg, "Sends text message to peer", NULL, {1}},  
+  {"reply_file", {{"msg_id", ca_msg_id}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, do_send_file, "Replies to peer with file", NULL, {1}},
+  {"reply_fwd", {{"msg_id", ca_msg_id}, {"fwd_id", ca_msg_id}}, do_fwd, "Forwards message to peer. Forward to secret chats is forbidden", NULL, {1}},
   {"reply_location", {{"msg_id", ca_msg_id}, {"latitude", ca_double}, {"longitude", ca_double}}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {1}},  
   
-  {"search", {{"chat", ca_chat | ca_optional}, {"limit", ca_number | ca_optional}, {"from", ca_number | ca_optional}, {"to", ca_number | ca_optional}, {"offset", ca_number | ca_optional}, {"query", ca_string_end}}, do_search, "search [peer] [limit] [from] [to] [offset] pattern\tSearch for pattern in messages from date from to date to (unixtime) in messages with peer (if peer not present, in all messages)", NULL, {}},
+  {"search", {{"chat", ca_chat | ca_optional}, {"limit", ca_number | ca_optional}, {"from", ca_number | ca_optional}, {"to", ca_number | ca_optional}, {"offset", ca_number | ca_optional}, {"query", ca_string_end}}, do_search, "Search for pattern in messages from date from to date to (unixtime) in messages with peer (if peer not present, in all messages)", NULL, {}},
   
-  {"send_file", {{"chat", ca_chat}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, do_send_file, "reply_file <peer> [type] <file> [caption]\tSends animation to peer", NULL, {0}},
-  {"send_location", {{"chat", ca_chat}, {"latitude", ca_double}, {"longitude", ca_double}}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {0}},
-  {"send_typing", {{"chat", ca_chat}, {"action", ca_string | ca_optional}, {"progress", ca_number | ca_optional}}, do_send_typing, "send_typing <chat> [typing|cancel|record_video|upload_video|record_voice|upload_voice|upload_photo|upload_document|choose_location|choose_contact] [progress]\tSends typing notification.", NULL, {}},
+  {"send_file", {{"chat", ca_chat}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, do_send_file, "Sends file to peer", NULL, {0}},
+  {"send_location", {{"chat", ca_chat}, {"latitude", ca_double}, {"longitude", ca_double}}, do_send_location, "Sends geo location", NULL, {0}},
+  {"send_typing", {{"chat", ca_chat}, {"action", ca_string | ca_optional}, {"progress", ca_number | ca_optional}}, do_send_typing, "Sends typing action action=[typing|cancel|record_video|upload_video|record_voice|upload_voice|upload_photo|upload_document|choose_location|choose_contact]", NULL, {}},
   
-  {"show_license", {}, do_show_license, "show_license\tPrints contents of GPL license", NULL, {}},
+  {"show_license", {}, do_show_license, "Prints contents of GPL license", NULL, {}},
   
-  {"start_bot", {{"user", ca_user}, {"chat", ca_chat}, {"data", ca_string}}, do_start_bot, "start_bot <bot> <chat> <data>\tAdds bot to chat", NULL, {}},
+  {"start_bot", {{"user", ca_user}, {"chat", ca_chat}, {"data", ca_string}}, do_start_bot, "Adds bot to chat", NULL, {}},
 
-  {"unblock_user", {{"user", ca_user}}, do_unblock_user, "unblock_user <user>\tUnblocks user", NULL, {}},
+  {"unblock_user", {{"user", ca_user}}, do_unblock_user, "Unblocks user", NULL, {}},
 
-  {"version", {}, do_version, "version\tPrints client and library version", NULL, {}},
+  {"version", {}, do_version, "Prints client and library version", NULL, {}},
 
-  {"view_file", {{"file_id", ca_number}}, do_load_file, "view_file <msg-id>\tDownloads file to downloads dirs. Then tries to open it with system default action", NULL, {1}},
+  {"view_file", {{"file_id", ca_number}}, do_load_file, "Downloads file to downloads dir. Then tries to open it with system default action", NULL, {1}},
  
-
-
-
-
-
 
 
 
@@ -1777,11 +1809,11 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   //{"fwd_media", {ca_chat, ca_msg_id, ca_none}, do_fwd_media, "fwd_media <peer> <msg-id>\tForwards message media to peer. Forward to secret chats is forbidden. Result slightly differs from fwd", NULL},
   //{"import_card", {ca_string, ca_none}, do_import_card, "import_card <card>\tGets user by card and prints it name. You can then send messages to him as usual", NULL},
   //{"msg_kbd", {ca_chat, ca_string, ca_msg_string_end, ca_none}, do_msg_kbd, "msg <peer> <kbd> <text>\tSends text message to peer with custom kbd", NULL},
-  {"quit", {}, do_quit, "quit\tQuits immediately", NULL, {}},
+  {"quit", {}, do_quit, "Quits immediately", NULL, {}},
   //{"rename_contact", {ca_user, ca_string, ca_string, ca_none}, do_rename_contact, "rename_contact <user> <first name> <last name>\tRenames contact", NULL},
-  {"safe_quit", {}, do_safe_quit, "safe_quit\tWaits for all queries to end, then quits", NULL, {}},
+  {"safe_quit", {}, do_safe_quit, "Waits for all queries to end, then quits", NULL, {}},
   //{"secret_chat_rekey", { ca_secret_chat, ca_none}, do_secret_chat_rekey, "generate new key for active secret chat", NULL},
-  {"set", {{"variable", ca_string}, {"value", ca_number}}, do_set, "set <param> <value>\tSets value of param. Currently available: log_level, debug_verbosity, alarm, msg_num", NULL, {}},
+  {"set", {{"variable", ca_string}, {"value", ca_number}}, do_set, "Sets value of param. Currently available: log_level, debug_verbosity, alarm, msg_num", NULL, {}},
   //{"set_password", {ca_string | ca_optional, ca_none}, do_set_password, "set_password <hint>\tSets password", NULL},
   //{"set_ttl", {ca_secret_chat, ca_number,  ca_none}, do_set_ttl, "set_ttl <secret chat>\tSets secret chat ttl. Client itself ignores ttl", NULL},
   //{"set_phone_number", {ca_string, ca_none}, do_set_phone_number, "set_phone_number <phone>\tChanges the phone number of this account", NULL},
