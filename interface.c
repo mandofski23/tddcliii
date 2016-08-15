@@ -1730,7 +1730,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"channel_get_admins", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "Gets channel admins", NULL, {tdl_channel_members_filter_admins}},
   {"channel_get_bots", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "Gets channel bots", NULL, {tdl_channel_members_filter_bots}},
   {"channel_get_kicked", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "Gets channel kicked members", NULL, {tdl_channel_members_filter_kicked}},
-  {"channel_get_members", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "channel_get_members <channel> [limit=100] [offset=0]\tGets channel recent members", NULL, {tdl_channel_members_filter_recent}},
+  {"channel_get_members", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, do_channel_get_members, "Gets channel recent members", NULL, {tdl_channel_members_filter_recent}},
   {"channel_change_about", {{"channel", ca_channel}, {"about", ca_string_end}}, do_channel_change_about, "Changes channel about info", NULL, {}},
   {"channel_change_username", {{"channel", ca_channel}, {"username", ca_string}}, do_channel_change_username, "Changes channel username", NULL, {}},
   {"channel_edit", {{"channel", ca_channel}, {"param", ca_string}, {"enabled", ca_string}}, do_channel_edit, "changes value of basic channel parameters. param=sign|invites. enabled=yes|no", NULL, {}}, 
