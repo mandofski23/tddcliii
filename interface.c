@@ -865,6 +865,11 @@ struct arg {
     tdl_message_id_t msg_id;
     //tgl_peer_id_t peer_id;
     struct tdl_chat_info *chat;
+
+    struct {
+      int vec_len;
+      struct arg *vec;
+    };
   };
 };
 
@@ -4036,6 +4041,244 @@ struct tgl_update_callback upd_cb = {
 
 };
 
+int parse_argument_string (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int opt = (D->type & ca_optional) | (D->type & ca_period);
+
+  char *save = line_ptr;
+  next_token ();
+
+  if (cur_token_end_str || cur_token_len < 0) {
+    A->str = NULL;
+    if (opt) {
+      line_ptr = save;
+      return 0;
+    }
+    return -1;
+  } else {
+    A->flags = 1;
+    A->str = strndup (cur_token, cur_token_len);
+    return 0;
+  }
+}
+
+int parse_argument_string_end (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  next_token_end ();
+      
+  if (cur_token_len < 0) { 
+    return -1;
+  } else {
+    A->flags = 1;
+    A->str = strndup (cur_token, cur_token_len);
+    return 0;
+  }
+}
+
+int parse_argument_number (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int opt = (D->type & ca_optional) | (D->type & ca_period);
+
+  char *save = line_ptr;
+  next_token ();
+
+  if (cur_token_end_str || cur_token_len < 0) {
+    A->num = NOT_FOUND;
+    if (opt) {
+      line_ptr = save;
+      return 0;
+    }
+    return -1;
+  } else {
+    char *token = strndup (cur_token, cur_token_len);
+    A->num = cur_token_int (token);
+    free (token);
+
+    if (A->num == NOT_FOUND) {
+      if (opt) {
+        line_ptr = save;
+        return 0;
+      } else {
+        return -1;
+      }
+    } else { 
+      return 0;
+    }
+  }
+}
+
+int parse_argument_double (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int opt = (D->type & ca_optional) | (D->type & ca_period);
+
+  char *save = line_ptr;
+  next_token ();
+
+  if (cur_token_end_str || cur_token_len < 0) {
+    A->dval = NOT_FOUND;
+    if (opt) {
+      line_ptr = save;
+      return 0;
+    }
+    return -1;
+  } else {
+    char *token = strndup (cur_token, cur_token_len);
+    A->dval = cur_token_double (token);
+    free (token);
+
+    if (A->dval == NOT_FOUND) {
+      if (opt) {
+        line_ptr = save;
+        return 0;
+      } else {
+        return -1;
+      }
+    } else { 
+      return 0;
+    }
+  }
+}
+
+int parse_argument_msg_id (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int opt = (D->type & ca_optional) | (D->type & ca_period);
+
+  char *save = line_ptr;
+  next_token ();
+
+  if (cur_token_end_str || cur_token_len < 0) {
+    A->msg_id.message_id = -1;
+    if (opt) {
+      line_ptr = save;
+      return 0;
+    }
+    return -1;
+  } else {
+    char *token = strndup (cur_token, cur_token_len);
+    tdl_message_id_t id = cur_token_msg_id (token, cmd);
+    free (token);
+
+    if (id.message_id == -2) {            
+      return -2;
+    }
+    A->msg_id = id;
+
+    if (A->msg_id.message_id == -1) {
+      if (opt) {
+        line_ptr = save;
+        return 0;
+      } else {
+        return -1;
+      }
+    } else { 
+      return 0;
+    }
+  }
+}
+
+int parse_argument_chat (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int opt = (D->type & ca_optional) | (D->type & ca_period);
+  int op = D->type & 255;
+
+  char *save = line_ptr;
+  next_token ();
+
+  if (cur_token_end_str || cur_token_len < 0) {
+    A->chat = NULL;
+    if (opt) {
+      line_ptr = save;
+      return 0;
+    }
+    return -1;
+  } else {
+    int m = -1;
+    if (op == ca_user) { m = tdl_chat_type_user; }
+    if (op == ca_group) { m = tdl_chat_type_group; }
+    if (op == ca_channel) { m = tdl_chat_type_channel; }
+    if (op == ca_secret_chat) { m = tdl_chat_type_secret_chat; }            
+
+    char *token = strndup (cur_token, cur_token_len);
+    struct tdl_chat_info *C = cur_token_peer (token, m, cmd);
+    free (token);
+            
+    if (C == (void *)-1l) {
+      return -2;
+    }
+
+    if (!C) {
+      if (opt) {
+        line_ptr = save;
+        return 0;
+      } else {
+        return -1;
+      }
+    } else { 
+      A->chat = C;
+      return 0;
+    }
+  }
+}
+
+int parse_argument_any (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int op = D->type & 255;
+
+  switch (op) {
+  case ca_user:
+  case ca_group:
+  case ca_secret_chat:
+  case ca_channel:
+  case ca_chat:
+    return parse_argument_chat (cmd, A, D);
+  case ca_file_name:
+  case ca_string:
+  case ca_media_type:
+  case ca_command:
+  case ca_modifier:
+    return parse_argument_string (cmd, A, D);
+  case ca_file_name_end:
+  case ca_string_end:
+  case ca_msg_string_end:
+    return parse_argument_string_end (cmd, A, D);
+  case ca_number:
+    return parse_argument_number (cmd, A, D);
+  case ca_double:
+    return parse_argument_double (cmd, A, D);
+  case ca_msg_id:
+    return parse_argument_msg_id (cmd, A, D);
+  case ca_none:
+  default:
+    logprintf ("type=%d\n", op);
+    assert (0);
+    return -1;
+  }
+}
+
+int parse_argument_period (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  A->flags = 2;
+
+  A->vec_len = 0;
+  A->vec = NULL;
+
+  struct arg T;
+  while (1) {
+    int r = parse_argument_any (cmd, &T, D);
+    if (r == -2) { return r; }
+    if (r == -1) {
+      return A->vec_len ? 0 : -1;
+    }
+    A->vec = realloc (A->vec, sizeof (struct arg) * (A->vec_len + 1));
+    A->vec[A->vec_len ++] = T;
+  }
+}
+
+void free_argument (struct arg *A) {
+  if (!A->flags) { return; }
+  if (A->flags == 1) {
+    free (A->str);
+    return;
+  }
+  assert (A->flags == 2);
+  int i;
+  for (i = 0; i < A->vec_len; i++) {
+    free_argument (&A->vec[i]);
+  }
+  free (A->vec);
+}
 
 void interpreter_ex (struct in_command *cmd) {  
   char *line = cmd->line;
@@ -4116,250 +4359,53 @@ void interpreter_ex (struct in_command *cmd) {
     return; 
   }
 
-  struct command_argument_desc *flags = command->args;
+  struct arg args[10];
+  memset (&args, 0, sizeof (args));
+
+  struct command_argument_desc *D = command->args;
   void (*fun)(struct command *, int, struct arg[], struct in_command *) = command->fun;
-  int args_num = 0;
-  static struct arg args[1000];
-  int first = 1;
-  while (1) {
-    assert (args_num < 1000);
-    args[args_num].flags = 0;
-    enum command_argument op = (flags->type) & 255;
-    int opt = (flags->type) & ca_optional;
-    int period = (flags->type) & ca_period;
 
-    if (op == ca_none) { 
-      next_token ();
-      if (cur_token_end_str) {
-        int z;
-        for (z = 0; z < count; z ++) {
-          fun (command, args_num, args, cmd);
-        }
-      } else {
-        fail_interface (TLS, cmd, ENOSYS, "too many args #%d", args_num);
-      }
-      break;
-    }
-      
-    if (op == ca_string_end || op == ca_file_name_end || op == ca_msg_string_end) {
-      next_token_end ();
-      if (cur_token_len < 0) { 
-        fail_interface (TLS, cmd, ENOSYS, "can not parse string_end arg #%d", args_num);
-        break;
-      } else {
-        args[args_num].flags = 1;
-        args[args_num ++].str = strndup (cur_token, cur_token_len);
-        int z;
-        for (z = 0; z < count; z ++) {
-          fun (command, args_num, args, cmd);
-        }
-        break;
-      }
-    }
-
-    char *save = line_ptr;
-    next_token ();
-    
-    static char *token;
-    if (token) {
-      free (token);
-    }
-    if (cur_token_len <= 0) {
-      token = NULL;
+  int p = 0;
+  int ok = 0;
+  while (D[p].type) {
+    int r;
+    if (D[p].type & ca_period) {
+      r = parse_argument_period (cmd, &args[p], &D[p]);
     } else {
-      token = strndup (cur_token, cur_token_len);
+      r = parse_argument_any (cmd, &args[p], &D[p]);
+    }
+    p ++;
+
+    if (r == -1) {
+      fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", p);
     }
 
-    if (period && cur_token_end_str) {
-      int z;
-      for (z = 0; z < count; z ++) {
-        fun (command, args_num, args, cmd);
-      }
+    if (r < 0) {
+      ok = r;
       break;
     }
-
-    if (op == ca_user || op == ca_group || op == ca_secret_chat || op == ca_chat || op == ca_number || op == ca_double || op == ca_msg_id || op == ca_channel) {
-      if (cur_token_quoted) {
-        if (opt) {
-          if (op != ca_number && op != ca_double && op != ca_msg_id) {
-            args[args_num ++].chat = NULL;
-          } else {
-            if (op == ca_number) {
-              args[args_num ++].num = NOT_FOUND;
-            } else if (op == ca_msg_id) {
-              args[args_num ++].msg_id.message_id = -1;
-            } else {
-              args[args_num ++].dval = NOT_FOUND;
-            }
-          }
-          line_ptr = save;
-          flags ++;
-          first = 1;
-          continue;
-        } else if (period) {
-          if (first) {
-            fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
-            break;
-          } else {
-            line_ptr = save;
-            flags ++;
-            first = 1;
-          }
-          continue;
-        } else {
-          fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
-          break;
-        }
-      } else {
-        if (cur_token_end_str) { 
-          if (opt) {
-            if (op != ca_number && op != ca_double && op != ca_msg_id) {
-              args[args_num ++].chat = NULL;
-            } else {
-              if (op == ca_number) {
-                args[args_num ++].num = NOT_FOUND;
-              } else if (op == ca_msg_id) {
-                args[args_num ++].msg_id.message_id = -1;
-              } else {
-                args[args_num ++].dval = NOT_FOUND;
-              }
-            }
-            line_ptr = save;
-            flags ++;
-            continue;
-          } else if (period) {
-            if (first) {
-              fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
-              break;
-            } else {
-              line_ptr = save;
-              flags ++;
-              first = 1;
-            }
-            continue;
-          } else {
-            break;
-          }
-        }
-        int ok = 1;
-        switch (op) {
-        case ca_user:
-        case ca_group:
-        case ca_secret_chat:
-        case ca_channel:
-        case ca_chat:
-          {
-            int m = -1;
-            if (op == ca_user) { m = tdl_chat_type_user; }
-            if (op == ca_group) { m = tdl_chat_type_group; }
-            if (op == ca_channel) { m = tdl_chat_type_channel; }
-            if (op == ca_secret_chat) { m = tdl_chat_type_secret_chat; }            
-            args[args_num ++].chat = cur_token_peer (token, m, cmd);
-            if (args[args_num - 1].chat == (void *)-1l) {
-              int i;
-              for (i = 0; i < args_num; i++) {
-                if (args[i].flags & 1) {
-                  free (args[i].str);
-                }
-              }
-              return;
-            }
-            if (args[args_num - 1].chat == NULL) {
-              ok = 0;
-            }
-          }
-          break;
-        case ca_number:
-          args[args_num ++].num = cur_token_int (token);
-          ok = (args[args_num - 1].num != NOT_FOUND);
-          break;
-        case ca_msg_id:
-          {
-            tdl_message_id_t id = cur_token_msg_id (token, cmd);
-            
-            if (id.message_id == -2) {            
-              int i;
-              for (i = 0; i < args_num; i++) {
-                if (args[i].flags & 1) {
-                  free (args[i].str);
-                }
-              }
-              return;
-            }
-            args[args_num ++].msg_id = id;
-            ok = id.message_id != -1;
-          }
-          break;
-        case ca_double:
-          args[args_num ++].dval = cur_token_double (token);
-          ok = (args[args_num - 1].dval != NOT_FOUND);
-          break;
-        default:
-          assert (0);
-        }
-
-        if (period && !ok) {
-          if (first) {
-            fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
-            break;
-          } else {
-            line_ptr = save;
-            flags ++;
-            first = 1;
-            args_num --;
-          }
-          continue;
-        }
-        if (opt && !ok) {
-          line_ptr = save;
-          flags ++;
-          first = 1;
-          continue;
-        }
-        if (!ok) {
-          fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
-          break;
-        }
-
-        if (!period) {
-          flags ++;
-          first = 1;
-        } else {
-          first = 0;
-        }
-        continue;
-      }
-    }
-    if (op == ca_string || op == ca_file_name || op == ca_command || op == ca_media_type) {
-      if (cur_token_end_str || cur_token_len < 0) {
-        if (opt) {
-          args[args_num ++].str = NULL;
-          flags ++;
-          continue;
-        }
-        fail_interface (TLS, cmd, ENOSYS, "can not parse string arg #%d", args_num);
-        break;
-      } else {
-        args[args_num].flags = 1;
-        args[args_num ++].str = strndup (cur_token, cur_token_len);
-        if (!period) {
-          flags ++;
-          first = 1;
-        } else {
-          first = 0;
-        }
-        continue;
-      }
-    }
-    //assert (0);
   }
-  int i;
-  for (i = 0; i < args_num; i++) {
-    if (args[i].flags & 1) {
-      free (args[i].str);
+
+  if (!ok) {
+    next_token ();
+    if (!cur_token_end_str) {
+      fail_interface (TLS, cmd, ENOSYS, "too many args #%d", p);
+      ok = -1;
+    }
+  }
+
+  if (!ok) {
+    int z;
+    for (z = 0; z < count; z ++) {
+      fun (command, p, args, cmd);
     }
   }
   
+  int i;
+  for (i = 0; i < p; i++) {
+    free_argument (&args[i]);
+  }
+
   update_prompt ();
 }
 
