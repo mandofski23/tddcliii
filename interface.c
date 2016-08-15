@@ -833,7 +833,6 @@ enum command_argument {
   ca_chat,
   ca_file_name,
   ca_file_name_end,
-  ca_period,
   ca_number,
   ca_string_end,
   ca_msg_string_end,
@@ -845,7 +844,8 @@ enum command_argument {
   ca_string,
 
 
-  ca_optional = 256
+  ca_optional = 256,
+  ca_period = 512
 };
 
 struct arg {
@@ -1678,7 +1678,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"chat_leave", {ca_chat, ca_none}, do_chat_leave, "chat_leave <chat>\tLeaves from chat", NULL, {}},
   {"chat_check_invite_link", {ca_string, ca_none}, do_chat_check_link, "chat_check_invite_link <link> - print info about chat by link", NULL, {}}, 
   {"chat_create_broadcast", {ca_string, ca_string, ca_none}, do_channel_create, "chat_create_broadcast <title> <about> - creates broadcast channel", NULL, {1, 0}},
-  {"chat_create_group", {ca_string, ca_user | ca_optional, ca_period, ca_none}, do_group_create, "chat_create_group <title> <user>+ - creates group chat. Should include at least one user", NULL, {}},
+  {"chat_create_group", {ca_string, ca_user | ca_optional | ca_period, ca_none}, do_group_create, "chat_create_group <title> <user>+ - creates group chat. Should include at least one user", NULL, {}},
   {"chat_create_supergroup", {ca_string, ca_string, ca_none}, do_channel_create, "chat_create_supergroup <title> <about> - creates supergroup channel", NULL, {0, 1}},
   {"chat_export_invite_link", {ca_chat, ca_none}, do_chat_export_link, "chat_export_invite_link <title> - exports new invite link (and invalidates previous)", NULL, {}}, 
   {"chat_import_invite_link", {ca_string, ca_none}, do_chat_import_link, "chat_get_invite_link <link> - get chat by invite link and joins if possible", NULL, {}}, 
@@ -1832,14 +1832,11 @@ enum command_argument get_complete_mode (void) {
   }
 
   enum command_argument *flags = command->args;
+  int first = 1;
   while (1) {
-    int period = 0;
-    if (*flags == ca_period) {
-      flags --;
-      period = 1;
-    }
     enum command_argument op = (*flags) & 255;
     int opt = (*flags) & ca_optional;
+    int period = (*flags) & ca_period;
 
     if (op == ca_none) { return ca_none; }
     if (op == ca_string_end || op == ca_file_name_end || op == ca_msg_string_end) {
@@ -1870,11 +1867,17 @@ enum command_argument get_complete_mode (void) {
         if (opt) {
           line_ptr = save;
           flags ++;
+          first = 1;
           continue;
         } else if (period) {
-          line_ptr = save;
-          flags += 2;
-          continue;
+          if (first) {
+            return ca_none;
+          } else {
+            line_ptr = save;
+            flags ++;
+            first = 1;
+            continue;
+          }
         } else {
           return ca_none;
         }
@@ -1926,18 +1929,29 @@ enum command_argument get_complete_mode (void) {
         if (opt && !ok) {
           line_ptr = save;
           flags ++;
+          first = 1;
           continue;
         }
         if (period && !ok) {
-          line_ptr = save;
-          flags += 2;
-          continue;
+          if (first) {
+            return ca_none;
+          } else {
+            line_ptr = save;
+            flags ++;
+            first = 1;
+            continue;
+          }
         }
         if (!ok) {
           return ca_none;
         }
 
-        flags ++;
+        if (!period) {
+          flags ++;
+          first = 1;
+        } else {
+          first = 0;
+        }
         continue;
       }
     }
@@ -1945,7 +1959,12 @@ enum command_argument get_complete_mode (void) {
       if (cur_token_end_str) {
         return op;
       } else {
-        flags ++;
+        if (!period) {
+          flags ++;
+          first = 1;
+        } else {
+          first = 0;
+        }
         continue;
       }
     }
@@ -2118,7 +2137,7 @@ int complete_username (int mode, int index, const char *text, ssize_t len, char 
     } else {
       type = A->type;
     }
-    if (!mode || mode == type) {
+    if (mode == -1 || mode == type) {
       if (!memcmp (A->name, text, len)) {
         *R = strdup (A->name);
         return index;
@@ -2174,7 +2193,7 @@ char *command_generator (const char *text, int state) {
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_chat:
-    index = complete_username (0, index, command_pos, command_len, &R);
+    index = complete_username (-1, index, command_pos, command_len, &R);
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_file_name:
@@ -4023,18 +4042,13 @@ void interpreter_ex (struct in_command *cmd) {
   void (*fun)(struct command *, int, struct arg[], struct in_command *) = command->fun;
   int args_num = 0;
   static struct arg args[1000];
+  int first = 1;
   while (1) {
     assert (args_num < 1000);
     args[args_num].flags = 0;
-    int period = 0;
-    if (*flags == ca_period) {
-      flags --;
-    }
-    if (*flags != ca_none && *(flags + 1) == ca_period) {
-      period = 1;
-    }
     enum command_argument op = (*flags) & 255;
     int opt = (*flags) & ca_optional;
+    int period = (*flags) & ca_period;
 
     if (op == ca_none) { 
       next_token ();
@@ -4102,10 +4116,17 @@ void interpreter_ex (struct in_command *cmd) {
           }
           line_ptr = save;
           flags ++;
+          first = 1;
           continue;
         } else if (period) {
-          line_ptr = save;
-          flags += 2;
+          if (first) {
+            fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
+            break;
+          } else {
+            line_ptr = save;
+            flags ++;
+            first = 1;
+          }
           continue;
         } else {
           fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
@@ -4129,8 +4150,14 @@ void interpreter_ex (struct in_command *cmd) {
             flags ++;
             continue;
           } else if (period) {
-            line_ptr = save;
-            flags += 2;
+            if (first) {
+              fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
+              break;
+            } else {
+              line_ptr = save;
+              flags ++;
+              first = 1;
+            }
             continue;
           } else {
             break;
@@ -4194,14 +4221,21 @@ void interpreter_ex (struct in_command *cmd) {
         }
 
         if (period && !ok) {
-          line_ptr = save;
-          flags += 2;
-          args_num --;
+          if (first) {
+            fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", args_num);
+            break;
+          } else {
+            line_ptr = save;
+            flags ++;
+            first = 1;
+            args_num --;
+          }
           continue;
         }
         if (opt && !ok) {
           line_ptr = save;
           flags ++;
+          first = 1;
           continue;
         }
         if (!ok) {
@@ -4209,7 +4243,12 @@ void interpreter_ex (struct in_command *cmd) {
           break;
         }
 
-        flags ++;
+        if (!period) {
+          flags ++;
+          first = 1;
+        } else {
+          first = 0;
+        }
         continue;
       }
     }
@@ -4225,7 +4264,12 @@ void interpreter_ex (struct in_command *cmd) {
       } else {
         args[args_num].flags = 1;
         args[args_num ++].str = strndup (cur_token, cur_token_len);
-        flags ++;
+        if (!period) {
+          flags ++;
+          first = 1;
+        } else {
+          first = 0;
+        }
         continue;
       }
     }
