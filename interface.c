@@ -1898,6 +1898,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"chat_with_peer", {{"chat", ca_chat}}, do_chat_with_peer, "Interface option. All input will be treated as messages to this peer. Type /quit to end this mode", NULL, {}},
   
   {"compose", {{"chat", ca_chat}}, do_compose, "Sends text message to peer", NULL, {0}},
+  {"compose_reply", {{"chat", ca_msg_id}}, do_compose, "Sends text message to peer", NULL, {1}},
   
   {"contact_list", {}, do_contact_list, "Prints contact list", NULL, {}},
   {"contact_delete", {{"user", ca_user}}, do_contact_delete, "Deletes user from contact list", NULL, {}},
