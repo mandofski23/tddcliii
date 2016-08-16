@@ -27,6 +27,9 @@
 #include <readline/history.h>
 #include <unistd.h>
 
+#include <sys/types.h>
+#include <sys/wait.h>
+
 //#include "queries.h"
 
 #include "interface.h"
@@ -55,6 +58,7 @@
 
 #include "tdc/tdlib-c-bindings.h"
 #include "telegram-layout.h"
+
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -1134,6 +1138,45 @@ void do_msg (struct command *command, int arg_num, struct arg args[], struct in_
   tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
+void do_compose (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
+  char tempname[128] = "/tmp/tdcli-XXXXXX";
+  int fd = mkstemp (tempname);
+
+  if (fd < 0) {
+    fail_interface (TLS, cmd, EINVAL, "Can not open temp file %s", tempname);
+    return;
+  }
+
+  pid_t r = fork ();
+
+  if (!r) {
+    logprintf ("tempname = %s\n", tempname);
+    if (execl ("/usr/bin/vim", "/usr/bin/vim", tempname, NULL) < 0) {
+      perror ("execl");
+      exit (73);
+    }
+  } else {
+    int status;
+    waitpid (r, &status, 0);
+    logprintf ("status = %d\n", WEXITSTATUS (status));
+  }
+
+  char buf[1 << 17];
+  int l = (int)pread (fd, buf, (1 << 17), 0);
+  close (fd);
+  unlink (tempname);
+
+  if (l < 0) {
+    fail_interface (TLS, cmd, EINVAL, "Can not read temp file %s", tempname);
+    return;
+  }
+
+  args[3].flags = 1;
+  args[3].str = strndup (buf, l);
+
+  do_msg (command, arg_num, args, cmd);
+}
+
 void do_send_file (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   cmd->refcnt ++;
   
@@ -1853,6 +1896,8 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"chat_import_invite_link", {{"link", ca_string}}, do_chat_import_link, "Get chat by invite link and joins if possible", NULL, {}}, 
   
   {"chat_with_peer", {{"chat", ca_chat}}, do_chat_with_peer, "Interface option. All input will be treated as messages to this peer. Type /quit to end this mode", NULL, {}},
+  
+  {"compose", {{"chat", ca_chat}}, do_compose, "Sends text message to peer", NULL, {0}},
   
   {"contact_list", {}, do_contact_list, "Prints contact list", NULL, {}},
   {"contact_delete", {{"user", ca_user}}, do_contact_delete, "Deletes user from contact list", NULL, {}},
