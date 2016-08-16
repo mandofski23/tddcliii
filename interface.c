@@ -76,6 +76,7 @@
 #include "tree.h"
 
 int total_unread;
+int disable_msg_preview;
 
 void empty_cb (struct tdlib_state *TLS, void *extra, int success) {}
 
@@ -183,8 +184,6 @@ int disable_colors;
 extern int alert_sound;
 extern int binlog_read;
 extern char *home_directory;
-int do_html;
-long long query_id;
 
 int safe_quit;
 
@@ -646,6 +645,8 @@ struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd)
       } else {
         return A->chat;
       }
+    } else if (!cmd) {
+      return NULL;
     } else {
       if (mode >= 0 && A->type != mode) {
         return NULL;
@@ -674,6 +675,10 @@ struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd)
       }
       return (void *)-1l;
     }
+  }
+
+  if (!cmd) {
+    return NULL;
   }
   
   if (*s == '@' && cur_token_len >= 2) {
@@ -882,11 +887,6 @@ struct command {
   long params[10];
 };
 
-
-int offline_mode;
-int reply_id;
-int disable_msg_preview;
-
 void print_user_list_gw (struct tdlib_state *TLS, void *extra, int success, int num, struct tdl_user *UL[]);
 void print_chat_members_gw (struct tdlib_state *TLS, void *extra, int success, int total, int num, struct tdl_chat_member *UL[]);
 void print_msg_list_gw (struct tdlib_state *TLS, void *extra, int success, int num, struct tdl_message *ML[]);
@@ -917,15 +917,16 @@ struct command commands[];
 
 /* {{{ client methods */
 void do_help (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   mprint_start (cmd->ev);
   int total = 0;
   mpush_color (cmd->ev, COLOR_YELLOW);
   struct command *cmd_it = commands;
+
+  const char *command_name = args[2].str;
   
   int max_len = 0;
   while (cmd_it->name) {  
-    if (!args[0].str || !strcmp (args[0].str, cmd_it->name)) {
+    if (!command_name || !strcmp (command_name, cmd_it->name)) {
       int len = (int)strlen (cmd_it->name);
       
       struct command_argument_desc *D = cmd_it->args;
@@ -946,7 +947,7 @@ void do_help (struct command *command, int arg_num, struct arg args[], struct in
   
   cmd_it = commands;
   while (cmd_it->name) {
-    if (!args[0].str || !strcmp (args[0].str, cmd_it->name)) {
+    if (!command_name || !strcmp (command_name, cmd_it->name)) {
       mprintf (cmd->ev, "%s", cmd_it->name);
       int len = (int)strlen (cmd_it->name);
       struct command_argument_desc *D = cmd_it->args;
@@ -967,15 +968,13 @@ void do_help (struct command *command, int arg_num, struct arg args[], struct in
     cmd_it ++;
   }
   if (!total) {
-    assert (arg_num == 1);
-    mprintf (cmd->ev, "Unknown command '%s'\n", args[0].str);
+    mprintf (cmd->ev, "Unknown command '%s'\n", command_name);
   }
   mpop_color (cmd->ev);
   mprint_end (cmd->ev);
 }
 
 void do_show_license (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (!arg_num);
   static char *b = 
 #include "LICENSE.h"
   ;
@@ -999,21 +998,23 @@ void do_safe_quit (struct command *command, int arg_num, struct arg args[], stru
 }
 
 void do_set (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  int num = (int)args[1].num;
-  if (!strcmp (args[0].str, "debug_verbosity")) {
-    tdlib_set_logger_verbosity (num);
-  } else if (!strcmp (args[0].str, "log_level")) {
-    log_level = num;
-  } else if (!strcmp (args[0].str, "msg_num")) {
-    msg_num_mode = num;
-  } else if (!strcmp (args[0].str, "alert")) {
-    alert_sound = num;
+  const char *var = args[2].str;
+  int value = (int)args[2].num;
+
+  if (!strcmp (var, "debug_verbosity")) {
+    tdlib_set_logger_verbosity (value);
+  } else if (!strcmp (var, "log_level")) {
+    log_level = value;
+  } else if (!strcmp (var, "msg_num")) {
+    msg_num_mode = value;
+  } else if (!strcmp (var, "alert")) {
+    alert_sound = value;
   }
 }
 
 void do_chat_with_peer (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   if (!cmd->ev) {
-    cur_chat_mode_chat = args[0].chat;
+    cur_chat_mode_chat = args[2].chat;
   }
 }
 
@@ -1026,7 +1027,6 @@ void do_main_session (struct command *command, int arg_num, struct arg args[], s
 }
 
 void do_version (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (!arg_num);
   mprint_start (cmd->ev); 
   mpush_color (cmd->ev, COLOR_YELLOW);
   mprintf (cmd->ev, "Telegram-cli version %s (uses tdlib)\n", TELEGRAM_CLI_VERSION);
@@ -1038,7 +1038,7 @@ void do_version (struct command *command, int arg_num, struct arg args[], struct
 /* {{{ WORK WITH ACCOUNT */
 
 void do_set_password (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
+  //assert (arg_num == 1);
   //tgl_do_set_password (TLS, ARG2STR_DEF(0, "empty"), print_success_gw, ev);
 }
 /* }}} */
@@ -1060,9 +1060,7 @@ void try_download_cb (struct tdlib_state *TLS, void *extra, int success) {
 }
 
 void do_load_file (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
- 
-  int id = (int)args[0].num;
+  int id = (int)args[2].num;
   struct file_wait *F = tree_lookup_file_wait (file_wait_tree, (void *)&id);
   if (!F) {
     F = calloc (sizeof (*F), 1);
@@ -1082,51 +1080,89 @@ void do_load_file (struct command *command, int arg_num, struct arg args[], stru
   }
 }
 
+long long find_modifier (int arg_num, struct arg args[], const char *name, int type) {
+  int i;
+  int name_len = (int)strlen (name);
+  for (i = 0; i < arg_num; i++) {
+    char *s = args[i].str;
+    int len = s ? (int)strlen (s) : 0;
+    if (s && len >= 3 && s[0] == '[' && s[len - 1] == ']' && !memcmp (s + 1, name, name_len)) {
+      if (type == 0) {
+        if (len == name_len + 2) {
+          return 1;
+        }
+      } else if (type == 1) {
+        return atoll (s + name_len + 1);
+      } else if (s[name_len + 1] == '=') {
+        return atoll (s + name_len + 2);
+      }
+    }
+  }
+  return 0;
+}
+
 /* {{{ SENDING MESSAGES */
 
 void do_msg (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
   
   long long chat_id;
+  int reply_id;
   if (command->params[0]) {
-    chat_id = args[0].msg_id.chat_id;
-    reply_id = args[0].msg_id.message_id;
+    chat_id = args[2].msg_id.chat_id;
+    reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[0].chat->id;
+    chat_id = args[2].chat->id;
+    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
- 
-  union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, args[1].str, do_html ? 1 : 0, disable_msg_preview, 1);
+
+  char *text = args[3].str;
+  int do_html = (int)find_modifier (args[0].vec_len, args[0].vec, "html", 0);
+
+  int disable_preview = disable_msg_preview;
+  if (disable_preview) {
+    if (find_modifier (args[0].vec_len, args[0].vec, "enable_preview", 0)) {
+      disable_preview = 0;
+    }
+  } else {
+    if (find_modifier (args[0].vec_len, args[0].vec, "disable_preview", 0)) {
+      disable_preview = 1;
+    }
+  }
+
+  union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, text, do_html, disable_preview, 1);
   tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_send_file (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num >= 2);
   cmd->refcnt ++;
   
   long long chat_id;
+  int reply_id;
   if (command->params[0]) {
-    chat_id = args[0].msg_id.chat_id;
-    reply_id = args[0].msg_id.message_id;
+    chat_id = args[2].msg_id.chat_id;    
+    reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[0].chat->id;
+    chat_id = args[2].chat->id;
+    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
+  char *media_type = args[3].str;
   enum tdl_media_type type;
-  if (args[1].str && strlen (args[1].str)) {
-    if (!strcmp (args[1].str, "animation")) {
+  if (media_type && strlen (media_type)) {
+    if (!strcmp (media_type, "animation")) {
       type = tdl_media_animation;
-    } else if (!strcmp (args[1].str, "audio")) {
+    } else if (!strcmp (media_type, "audio")) {
       type = tdl_media_audio;
-    } else if (!strcmp (args[1].str, "document")) {
+    } else if (!strcmp (media_type, "document")) {
       type = tdl_media_document;
-    } else if (!strcmp (args[1].str, "photo")) {
+    } else if (!strcmp (media_type, "photo")) {
       type = tdl_media_photo;
-    } else if (!strcmp (args[1].str, "sticker")) {
+    } else if (!strcmp (media_type, "sticker")) {
       type = tdl_media_sticker;
-    } else if (!strcmp (args[1].str, "video")) {
+    } else if (!strcmp (media_type, "video")) {
       type = tdl_media_video;
-    } else if (!strcmp (args[1].str, "voice")) {
+    } else if (!strcmp (media_type, "voice")) {
       type = tdl_media_voice;
     } else {
       fail_interface (TLS, cmd, EINVAL, "Unknown media type");
@@ -1135,58 +1171,73 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
   } else {
     type = tdl_media_document;
   }
+  
+  char *file_name = args[4].str;
+  char *caption = args[5].str;
 
-  union tdl_input_file *f = tdlib_create_input_file_local (TLS, args[2].str);
-  union tdl_input_message_content *content = tdlib_create_input_message_content_media (TLS, type, 0, 0, 0, NULL, arg_num == 3 ? NULL : args[3].str, NULL, NULL, 0, f);
+  union tdl_input_file *f = tdlib_create_input_file_local (TLS, file_name);
+  union tdl_input_message_content *content = tdlib_create_input_message_content_media (TLS, type, 0, 0, 0, NULL, caption, NULL, NULL, 0, f);
   tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_send_location (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
   cmd->refcnt ++;
   
   long long chat_id;
+  int reply_id;
   if (command->params[0]) {
-    chat_id = args[0].msg_id.chat_id;
-    reply_id = args[0].msg_id.message_id;
+    chat_id = args[2].msg_id.chat_id;
+    reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[0].chat->id;
+    chat_id = args[2].chat->id;
+    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
-  union tdl_input_message_content *content = tdlib_create_input_message_content_venue (TLS, args[1].dval, args[2].dval, NULL, NULL, NULL, NULL);
+  double longitude = args[3].dval;
+  double latitude = args[4].dval;
+
+  union tdl_input_message_content *content = tdlib_create_input_message_content_venue (TLS, longitude, latitude, NULL, NULL, NULL, NULL);
   tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_send_contact (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 4);
   cmd->refcnt ++;
   
   long long chat_id;
+  int reply_id;
   if (command->params[0]) {
-    chat_id = args[0].msg_id.chat_id;    
-    reply_id = args[0].msg_id.message_id;
+    chat_id = args[2].msg_id.chat_id;    
+    reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[0].chat->id;
+    chat_id = args[2].chat->id;
+    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
-  union tdl_input_message_content *content = tdlib_create_input_message_content_contact (TLS,  args[1].str, args[2].str, args[3].str, 0);
+  char *phone = args[3].str;
+  char *first_name = args[4].str;
+  char *last_name = args[5].str;
+
+  union tdl_input_message_content *content = tdlib_create_input_message_content_contact (TLS, phone, first_name, last_name, 0);
   tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
 void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num >= 2);
-  assert (arg_num <= 1000);
   cmd->refcnt ++;
   
   long long chat_id;
+  int reply_id;
   if (command->params[0]) {
-    chat_id = args[0].msg_id.chat_id;
-    reply_id = args[0].msg_id.message_id;
+    chat_id = args[2].msg_id.chat_id;
+    reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[0].chat->id;
+    chat_id = args[2].chat->id;
+    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
+
+  long long from_chat_id = args[3].msg_id.chat_id;
+  int msg_id = args[3].msg_id.message_id;
   
-  union tdl_input_message_content *content = tdlib_create_input_message_content_forward (TLS, args[1].msg_id.chat_id, args[1].msg_id.message_id);
+  union tdl_input_message_content *content = tdlib_create_input_message_content_forward (TLS, from_chat_id, msg_id);
   tdlib_send_message (TLS, print_msg_success_gw, cmd, chat_id, reply_id, 0, 0, NULL, content);
 }
 
@@ -1195,21 +1246,22 @@ void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_
 /* {{{ EDITING SELF PROFILE */
 
 void do_change_profile_photo (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_set_profile_photo (TLS, print_success_gw, cmd, args[0].str,  NULL);
+  char *file_name = args[2].str;
+  tdlib_set_profile_photo (TLS, print_success_gw, cmd, file_name,  NULL);
 }
 
 void do_change_profile_name (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
-  tdlib_change_name (TLS, print_success_gw, cmd, args[0].str, args[1].str);
+  char *first_name = args[2].str;
+  char *last_name = args[3].str;
+  tdlib_change_name (TLS, print_success_gw, cmd, first_name, last_name);
 }
 
 void do_change_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_change_username (TLS, print_success_gw, cmd, args[0].str);
+  char *username = args[2].str;
+  tdlib_change_username (TLS, print_success_gw, cmd, username);
 }
 
 /* }}} */
@@ -1217,29 +1269,33 @@ void do_change_username (struct command *command, int arg_num, struct arg args[]
 /* {{{ WORKING WITH GROUP CHATS */
 
 void do_chat_change_photo (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
-  tdlib_change_chat_photo (TLS, print_success_gw, cmd, args[0].chat->id, tdlib_create_input_file_local (TLS, args[1].str),  NULL);
+  long long chat_id = args[2].chat->id;
+  char *file_name = args[3].str;
+  tdlib_change_chat_photo (TLS, print_success_gw, cmd, chat_id, tdlib_create_input_file_local (TLS, file_name),  NULL);
 }
 
 void do_chat_change_title (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
-  tdlib_change_chat_title (TLS, print_success_gw, cmd, args[0].chat->id, args[1].str);
+  long long chat_id = args[2].chat->id;
+  char *title = args[3].str;
+  tdlib_change_chat_title (TLS, print_success_gw, cmd, chat_id, title);
 }
 
 void do_chat_info (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  switch (args[0].chat->chat->type) {
+
+  struct tdl_chat_info *C = args[2].chat;
+
+  switch (C->chat->type) {
   case tdl_chat_type_user:
-    tdlib_get_user_full (TLS, print_user_info_gw, cmd, args[0].chat->chat->user.id);
+    tdlib_get_user_full (TLS, print_user_info_gw, cmd, C->chat->user.id);
     break;
   case tdl_chat_type_group:
-    tdlib_get_group_full (TLS, print_group_info_gw, cmd, args[0].chat->chat->group.id);
+    tdlib_get_group_full (TLS, print_group_info_gw, cmd, C->chat->group.id);
     break;
   case tdl_chat_type_channel:
-    tdlib_get_channel_full (TLS, print_channel_info_gw, cmd, args[0].chat->chat->channel.id);
+    tdlib_get_channel_full (TLS, print_channel_info_gw, cmd, C->chat->channel.id);
     break;
   case tdl_chat_type_secret_chat:
     break;
@@ -1247,100 +1303,130 @@ void do_chat_info (struct command *command, int arg_num, struct arg args[], stru
 }
 
 void do_chat_change_role (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
-
   enum tdl_chat_member_role role;
 
-  if (!strcmp (args[2].str, "creator")) {
+  char *role_str = args[4].str;
+  if (!strcmp (role_str, "creator")) {
     role = tdl_chat_member_role_creator;
-  } else if (!strcmp (args[2].str, "editor")) {
+  } else if (!strcmp (role_str, "editor")) {
     role = tdl_chat_member_role_editor;
-  } else if (!strcmp (args[2].str, "moderator")) {
+  } else if (!strcmp (role_str, "moderator")) {
     role = tdl_chat_member_role_moderator;
-  } else if (!strcmp (args[2].str, "general")) {
+  } else if (!strcmp (role_str, "general")) {
     role = tdl_chat_member_role_general;
-  } else if (!strcmp (args[2].str, "kicked")) {
+  } else if (!strcmp (role_str, "kicked")) {
     role = tdl_chat_member_role_kicked;
   } else {
     fail_interface (TLS, cmd, EINVAL, "Unknown member role");
     return;
   }
   
+  long long chat_id = args[2].chat->id;
+  int user_id = args[3].chat->chat->user.id;
+
   cmd->refcnt ++;
-  tdlib_chat_change_member_role (TLS, print_success_gw, cmd, args[0].chat->id, args[1].chat->chat->user.id, role);
+  tdlib_chat_change_member_role (TLS, print_success_gw, cmd, chat_id, user_id, role);
 }
 
 void do_chat_add_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
   cmd->refcnt ++;
-  tdlib_chat_add_member (TLS, print_success_gw, cmd, args[0].chat->id, args[1].chat->chat->user.id, args[2].num == NOT_FOUND ? 0 : (int)args[2].num);
+
+  long long chat_id = args[2].chat->id;
+  int user_id = args[3].chat->chat->user.id;
+  int fwd_msg_num = (args[4].num == NOT_FOUND) ? 0 : (int)args[4].num;
+
+  tdlib_chat_add_member (TLS, print_success_gw, cmd, chat_id, user_id, fwd_msg_num);
 }
 
 void do_chat_del_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
-  tdlib_chat_change_member_role (TLS, print_success_gw, cmd, args[0].chat->id, args[1].chat->chat->user.id, tdl_chat_member_role_kicked);
+  
+  long long chat_id = args[2].chat->id;
+  int user_id = args[3].chat->chat->user.id;
+  
+  tdlib_chat_change_member_role (TLS, print_success_gw, cmd, chat_id, user_id, tdl_chat_member_role_kicked);
 }
 
 void do_chat_join (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_chat_add_member (TLS, print_success_gw, cmd, args[0].chat->id, TLS->my_id, 0);
+  
+  long long chat_id = args[2].chat->id;
+  
+  tdlib_chat_add_member (TLS, print_success_gw, cmd, chat_id, TLS->my_id, 0);
 }
 
 void do_chat_leave (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_chat_change_member_role (TLS, print_success_gw, cmd, args[0].chat->id, TLS->my_id, tdl_chat_member_role_kicked);
+  
+  long long chat_id = args[2].chat->id;
+  
+  tdlib_chat_change_member_role (TLS, print_success_gw, cmd, chat_id, TLS->my_id, tdl_chat_member_role_kicked);
 }
     
 void do_group_create (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num >= 1 && arg_num <= 1000);
+  char *title = args[2].str;
+  assert (args[3].vec_len <= 1000);
+  
   int ids[1000];
+  
   int i;
-  for (i = 0; i < arg_num - 1; i++) {
-    ids[i] = args[i + 1].chat->chat->user.id;
+  for (i = 0; i < args[2].vec_len; i++) {
+    ids[i] = args[3].vec[i].chat->chat->user.id;
   }
 
   cmd->refcnt ++;
-  tdlib_create_new_group_chat (TLS, print_chat_gw, cmd, args[0].str, arg_num - 1, ids);
+  tdlib_create_new_group_chat (TLS, print_chat_gw, cmd, title, args[2].vec_len, ids);
 }
     
 void do_channel_create (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
-  tdlib_create_new_channel_chat (TLS, print_chat_gw, cmd, args[0].str, (int)command->params[0], (int)command->params[1], args[1].str);
+  
+  char *title = args[2].str;
+  char *about = args[3].str;
+  
+  tdlib_create_new_channel_chat (TLS, print_chat_gw, cmd, title, (int)command->params[0], (int)command->params[1], about);
 }
 
 void do_chat_export_link (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_export_chat_invite_link (TLS, print_string_gw, cmd, args[0].chat->id);
+  
+  long long chat_id = args[2].chat->id;
+  
+  tdlib_export_chat_invite_link (TLS, print_string_gw, cmd, chat_id);
 }
 
 void do_chat_import_link (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_import_chat_invite_link (TLS, print_success_gw, cmd, args[0].str);
+
+  char *link = args[2].str;
+
+  tdlib_import_chat_invite_link (TLS, print_success_gw, cmd, link);
 }
 
 void do_chat_check_link (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_check_chat_invite_link (TLS, print_invite_link_gw, cmd, args[0].str);
+
+  char *link = args[2].str;
+
+  tdlib_check_chat_invite_link (TLS, print_invite_link_gw, cmd, link);
 }
 
 void do_channel_get_members (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
   cmd->refcnt ++;
-  assert (args[0].chat->chat->type == tdl_chat_type_channel);
-  tdlib_get_channel_members (TLS, print_chat_members_gw, cmd, args[0].chat->chat->channel.id, (int)command->params[0], args[2].num == NOT_FOUND ? 0 : (int)args[2].num, args[1].num == NOT_FOUND ? 100 : (int)args[1].num);
+
+  int channel_id = args[2].chat->chat->channel.id;
+  int limit = (args[3].num == NOT_FOUND) ? 0 : (int)args[3].num;
+  int offset = (args[4].num == NOT_FOUND) ? 0 : (int)args[4].num;
+
+  tdlib_get_channel_members (TLS, print_chat_members_gw, cmd, channel_id, (int)command->params[0], offset, limit);
 }
 
 void do_group_upgrade (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_migrate_group_to_channel (TLS, print_chat_gw, cmd, args[0].chat->id);
+
+  long long chat_id = args[2].chat->id;
+
+  tdlib_migrate_group_to_channel (TLS, print_chat_gw, cmd, chat_id);
 }
 
 
@@ -1349,63 +1435,76 @@ void do_group_upgrade (struct command *command, int arg_num, struct arg args[], 
 /* {{{ WORKING WITH USERS */
 
 void do_add_contact (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
   cmd->refcnt ++;
-  struct tdl_input_contact *C = tdlib_create_input_contact (TLS, args[0].str, args[1].str, args[2].str);
+
+  char *phone = args[2].str;
+  char *first_name = args[3].str;
+  char *last_name = args[4].str;
+
+  struct tdl_input_contact *C = tdlib_create_input_contact (TLS, phone, first_name, last_name);
   tdlib_import_contacts (TLS, print_user_list_gw, cmd, 1, &C);
 }
 
 
 void do_block_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_block_user (TLS, print_success_gw, cmd, args[0].chat->chat->user.id);
+
+  int user_id = args[2].chat->chat->user.id;
+
+  tdlib_block_user (TLS, print_success_gw, cmd, user_id);
 }
 
 void do_unblock_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_unblock_user (TLS, print_success_gw, cmd, args[0].chat->chat->user.id);
+
+  int user_id = args[2].chat->chat->user.id;
+
+  tdlib_unblock_user (TLS, print_success_gw, cmd, user_id);
 }
 /* }}} */
 
 /* WORKING WITH CHANNELS {{{ */
 
 void do_channel_change_about (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
-  tdlib_change_channel_about (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, args[1].str);
+
+  int channel_id = args[2].chat->chat->channel.id;
+  char *about = args[3].str;
+
+  tdlib_change_channel_about (TLS, print_success_gw, cmd, channel_id, about);
 }
 
 void do_channel_change_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 2);
   cmd->refcnt ++;
-  char *u = args[1].str;
-  if (*u == '@') { u ++; }
-  tdlib_change_channel_username (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, u);
+
+  int channel_id = args[2].chat->chat->channel.id;
+  char *username = args[3].str;
+  if (*username == '@') { username ++; }
+
+  tdlib_change_channel_username (TLS, print_success_gw, cmd, channel_id, username);
 }
 
 void do_channel_edit (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
-  
+  cmd->refcnt ++;
+
+  char *enabled = args[4].str;
   int mode;
-  if (!strcmp (args[2].str, "on")) {
+  if (!strcmp (enabled, "yes")) {
     mode = 1;
-  } else if (!strcmp (args[2].str, "off")) {
+  } else if (!strcmp (enabled, "no")) {
     mode = 0;
   } else {
-    fail_interface (TLS, cmd, EINVAL, "on/off expected as third argument");
+    fail_interface (TLS, cmd, EINVAL, "yes/no expected as third argument");
     return;
   }
   
-  cmd->refcnt ++;
+  int channel_id = args[2].chat->chat->channel.id;
+  char *scope = args[3].str;
 
-  /*if (!strcmp (args[1].str, "comments")) {
-    tdlib_toggle_channel_comments (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, mode);
-  } else */if (!strcmp (args[1].str, "invites")) {
-    tdlib_toggle_channel_invites (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, mode);
+  if (!strcmp (scope, "invites")) {
+    tdlib_toggle_channel_invites (TLS, print_success_gw, cmd, channel_id, mode);
   } else if (!strcmp (args[1].str, "sign")) {
-    tdlib_toggle_channel_sign_messages (TLS, print_success_gw, cmd, args[0].chat->chat->channel.id, mode);
+    tdlib_toggle_channel_sign_messages (TLS, print_success_gw, cmd, channel_id, mode);
   } else {
     in_command_decref (cmd);
     fail_interface (TLS, cmd, EINVAL, "invites/sign expected as second argument");
@@ -1418,10 +1517,12 @@ void do_channel_edit (struct command *command, int arg_num, struct arg args[], s
 /* {{{ WORKING WITH DIALOG LIST */
 
 void do_dialog_list (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num <= 2);
   cmd->refcnt ++;
-  int off = args[1].num != NOT_FOUND ? (int)args[1].num : 0;
-  tdlib_get_chats (TLS, print_dialog_list_gw, cmd, (1ull << 63) - 1 - off, 0, args[0].num != NOT_FOUND ? (int)args[0].num : 10);
+
+  int limit = (args[2].num == NOT_FOUND) ? 10 : (int)args[2].num;
+  int offset = (args[3].num == NOT_FOUND) ? 0 : (int)args[3].num;
+  
+  tdlib_get_chats (TLS, print_dialog_list_gw, cmd, (1ull << 63) - 1 - offset, 0, limit);
 }
 
 void do_resolve_username_cb2 (struct tdlib_state *TLS, void *ev, int success, struct tdl_channel *U) {
@@ -1444,26 +1545,28 @@ void do_resolve_username_cb (struct tdlib_state *TLS, void *ev, int success, str
 }
 
 void do_resolve_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
+  
   void **T = malloc (sizeof (void *) * 2);
   T[0] = cmd;
-  char *u = args[0].str;
+  char *u = args[2].str;
   if (*u == '@') { u ++; }
   T[1] = strdup (u);
   tdlib_search_user (TLS, do_resolve_username_cb, T, u);
 }
 
 void do_contact_list (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (!arg_num);
   cmd->refcnt ++;
+  
   tdlib_get_contacts (TLS, print_user_list_gw, cmd);
 }
 
 void do_contact_delete (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_delete_contacts (TLS, print_success_gw, cmd, 1, &args[0].chat->chat->user.id);
+  
+  int user_id = args[2].chat->chat->user.id;
+
+  tdlib_delete_contacts (TLS, print_success_gw, cmd, 1, &user_id);
 }
 
 /* }}} */
@@ -1471,9 +1574,12 @@ void do_contact_delete (struct command *command, int arg_num, struct arg args[],
 /* {{{ WORKING WITH ONE DIALOG */
 
 void do_mark_read (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_view_messages (TLS, print_success_gw, cmd, args[0].chat->id, 1, &args[0].chat->top_message->id);
+  
+  long long chat_id = args[2].chat->id;
+  int id = args[2].chat->top_message ? args[2].chat->top_message->id : 0;
+   
+  tdlib_view_messages (TLS, print_success_gw, cmd, chat_id, 1, &id);
 }
 
 struct chat_history_extra {
@@ -1544,17 +1650,16 @@ void do_send_history_query (struct chat_history_extra *e) {
 }
 
 void do_history (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
   cmd->refcnt ++;
 
   struct chat_history_extra *e = malloc (sizeof (*e));
   e->cmd = cmd;
   e->current_pos = 0;
   e->current_size = 0;
-  e->current_offset = args[2].num != NOT_FOUND ? (int)args[2].num : 0;
-  e->limit = args[1].num != NOT_FOUND ? (int)args[1].num : 40;
+  e->current_offset = args[4].num != NOT_FOUND ? (int)args[4].num : 0;
+  e->limit = args[3].num != NOT_FOUND ? (int)args[3].num : 40;
   e->last_msg_id = 0;
-  e->chat_id = args[0].chat->id;
+  e->chat_id = args[2].chat->id;
   e->list = NULL;
   
   do_send_history_query (e);
@@ -1563,28 +1668,28 @@ void do_history (struct command *command, int arg_num, struct arg args[], struct
 void print_fail (struct in_command *cmd);
 
 void do_send_typing (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
   enum tdl_message_typing_action status;
-  
-  if (!args[1].str || !strcmp (args[1].str, "typing")) {
+
+  char *typing = args[3].str;
+  if (!typing || !strcmp (typing, "typing")) {
     status = tdl_message_typing_action_typing;
-  } else if (!strcmp (args[1].str, "cancel")) {
+  } else if (!strcmp (typing, "cancel")) {
     status = tdl_message_typing_action_cancel;
-  } else if (!strcmp (args[1].str, "record_video")) {
+  } else if (!strcmp (typing, "record_video")) {
     status = tdl_message_typing_action_record_video;
-  } else if (!strcmp (args[1].str, "upload_video")) {
+  } else if (!strcmp (typing, "upload_video")) {
     status = tdl_message_typing_action_upload_video;
-  } else if (!strcmp (args[1].str, "record_voice")) {
+  } else if (!strcmp (typing, "record_voice")) {
     status = tdl_message_typing_action_record_voice;
-  } else if (!strcmp (args[1].str, "upload_voice")) {
+  } else if (!strcmp (typing, "upload_voice")) {
     status = tdl_message_typing_action_upload_voice;
-  } else if (!strcmp (args[1].str, "upload_photo")) {
+  } else if (!strcmp (typing, "upload_photo")) {
     status = tdl_message_typing_action_upload_photo;
-  } else if (!strcmp (args[1].str, "upload_document")) {
+  } else if (!strcmp (typing, "upload_document")) {
     status = tdl_message_typing_action_upload_document;
-  } else if (!strcmp (args[1].str, "choose_location")) {
+  } else if (!strcmp (typing, "choose_location")) {
     status = tdl_message_typing_action_send_location;
-  } else if (!strcmp (args[1].str, "choose_contact")) {
+  } else if (!strcmp (typing, "choose_contact")) {
     status = tdl_message_typing_action_choose_contact;
   } else {
     fail_interface (TLS, cmd, ENOSYS, "illegal typing status");
@@ -1592,6 +1697,8 @@ void do_send_typing (struct command *command, int arg_num, struct arg args[], st
   }
 
   cmd->refcnt ++;
+
+  long long chat_id = args[2].chat->id;
 
   switch (status) {
   case tdl_message_typing_action_typing:
@@ -1602,7 +1709,7 @@ void do_send_typing (struct command *command, int arg_num, struct arg args[], st
   case tdl_message_typing_action_choose_contact:
     {
       union tdl_user_action *U = tdlib_create_user_typing_action_simple (TLS, status);
-      tdlib_send_chat_action (TLS, print_success_gw, cmd, args[0].chat->id, U);
+      tdlib_send_chat_action (TLS, print_success_gw, cmd, chat_id, U);
     }
     break;
   case tdl_message_typing_action_upload_video:
@@ -1610,9 +1717,9 @@ void do_send_typing (struct command *command, int arg_num, struct arg args[], st
   case tdl_message_typing_action_upload_photo:
   case tdl_message_typing_action_upload_document:
     {
-      int progress = args[2].num == NOT_FOUND ? 0 : (int)args[2].num;
+      int progress = args[4].num == NOT_FOUND ? 0 : (int)args[4].num;
       union tdl_user_action *U = tdlib_create_user_typing_action_upload (TLS, status, progress);
-      tdlib_send_chat_action (TLS, print_success_gw, cmd, args[0].chat->id, U);
+      tdlib_send_chat_action (TLS, print_success_gw, cmd, chat_id, U);
     }
     break;
   }
@@ -1624,50 +1731,36 @@ void do_send_typing (struct command *command, int arg_num, struct arg args[], st
 /* {{{ ANOTHER MESSAGES FUNCTIONS */
 
 void do_search (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 6);
-  int limit;
-  if (args[1].num != NOT_FOUND) {
-    limit = (int)args[1].num; 
-  } else {
-    limit = 40;
-  }
-  int from;
-  if (args[2].num != NOT_FOUND) {
-    from = (int)args[2].num; 
-  } else {
-    from = 0;
-  }
-  /*int to;
-  if (args[3].num != NOT_FOUND) {
-    to = (int)args[3].num; 
-  } else {
-    to = 0;
-  }*/
-  /*int offset;
-  if (args[4].num != NOT_FOUND) {
-    offset = (int)args[4].num; 
-  } else {
-    offset = 0;
-  }*/
+  int limit = (args[3].num == NOT_FOUND) ? 40 : (int)args[3].num;
+  int from = (args[4].num == NOT_FOUND) ? 0 : (int)args[4].num;
+  
   cmd->refcnt ++;
+  long long chat_id = args[2].chat ? args[2].chat->id : 0;
+  char *query = args[7].str;
 
-  if (args[0].chat) {
-    tdlib_search_chat_messages (TLS, print_msg_list_gw, cmd, args[0].chat->id, args[5].str, from, limit, 0, tdl_search_messages_filter_empty);
+  if (chat_id) {
+    tdlib_search_chat_messages (TLS, print_msg_list_gw, cmd, chat_id, query, from, limit, 0, tdl_search_messages_filter_empty);
   } else {
-    tdlib_search_messages (TLS, print_msg_list_gw, cmd, args[5].str, 0, 0, 0, limit);
+    tdlib_search_messages (TLS, print_msg_list_gw, cmd, query, 0, 0, 0, limit);
   }
 }
 
 void do_delete_msg (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   cmd->refcnt ++;
 
-  tdlib_delete_messages (TLS, print_success_gw, cmd, args[0].msg_id.chat_id, 1, &args[0].msg_id.message_id);
+  long long chat_id = args[2].msg_id.chat_id;
+  int msg_id = args[2].msg_id.message_id;
+
+  tdlib_delete_messages (TLS, print_success_gw, cmd, chat_id, 1, &msg_id);
 }
 
 void do_get_message (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 1);
   cmd->refcnt ++;
-  tdlib_get_message (TLS, print_msg_gw, cmd, args[0].msg_id.chat_id, args[0].msg_id.message_id);
+  
+  long long chat_id = args[2].msg_id.chat_id;
+  int msg_id = args[2].msg_id.message_id;
+
+  tdlib_get_message (TLS, print_msg_gw, cmd, chat_id, msg_id);
 }
 
 /* }}} */
@@ -1675,9 +1768,13 @@ void do_get_message (struct command *command, int arg_num, struct arg args[], st
 /* {{{ BOT */
 
 void do_start_bot (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  assert (arg_num == 3);
   cmd->refcnt ++;
-  tdlib_send_bot_start_message (TLS, print_msg_success_gw, cmd, args[0].chat->chat->user.id, args[1].chat->id, args[2].str);
+  
+  int user_id = args[2].chat->chat->user.id;
+  long long chat_id = args[3].chat->id;
+  char *token = args[4].str;
+
+  tdlib_send_bot_start_message (TLS, print_msg_success_gw, cmd, user_id, chat_id, token);
 }
 /* }}} */
 
@@ -1788,12 +1885,12 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"reply", {{"msg_id", ca_msg_id}, {"text", ca_msg_string_end}}, do_msg, "Sends text message to peer", NULL, {1}},  
   {"reply_file", {{"msg_id", ca_msg_id}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, do_send_file, "Replies to peer with file", NULL, {1}},
   {"reply_fwd", {{"msg_id", ca_msg_id}, {"fwd_id", ca_msg_id}}, do_fwd, "Forwards message to peer. Forward to secret chats is forbidden", NULL, {1}},
-  {"reply_location", {{"msg_id", ca_msg_id}, {"latitude", ca_double}, {"longitude", ca_double}}, do_send_location, "send_location <peer> <latitude> <longitude>\tSends geo location", NULL, {1}},  
+  {"reply_location", {{"msg_id", ca_msg_id}, {"longitude", ca_double}, {"latitude", ca_double}}, do_send_location, "Sends geo location", NULL, {1}},  
   
   {"search", {{"chat", ca_chat | ca_optional}, {"limit", ca_number | ca_optional}, {"from", ca_number | ca_optional}, {"to", ca_number | ca_optional}, {"offset", ca_number | ca_optional}, {"query", ca_string_end}}, do_search, "Search for pattern in messages from date from to date to (unixtime) in messages with peer (if peer not present, in all messages)", NULL, {}},
   
   {"send_file", {{"chat", ca_chat}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, do_send_file, "Sends file to peer", NULL, {0}},
-  {"send_location", {{"chat", ca_chat}, {"latitude", ca_double}, {"longitude", ca_double}}, do_send_location, "Sends geo location", NULL, {0}},
+  {"send_location", {{"chat", ca_chat}, {"longitude", ca_double}, {"latitude", ca_double}}, do_send_location, "Sends geo location", NULL, {0}},
   {"send_typing", {{"chat", ca_chat}, {"action", ca_string | ca_optional}, {"progress", ca_number | ca_optional}}, do_send_typing, "Sends typing action action=[typing|cancel|record_video|upload_video|record_voice|upload_voice|upload_photo|upload_document|choose_location|choose_contact]", NULL, {}},
   
   {"show_license", {}, do_show_license, "Prints contents of GPL license", NULL, {}},
@@ -1841,189 +1938,7 @@ void register_new_command (struct command *cmd) {
 //tgl_peer_t *autocomplete_peer;
 //tdl_message_id_t autocomplete_id;
 
-enum command_argument get_complete_mode (void) {
-  force_end_mode = 0;
-  line_ptr = rl_line_buffer;
-  //autocomplete_peer = NULL;
-  //autocomplete_id.peer_type = NOT_FOUND;
-
-  while (1) {
-    next_token ();
-    if (cur_token_quoted) { return ca_none; }
-    if (cur_token_len <= 0) { return ca_command; }
-    if (*cur_token == '[') {
-      if (cur_token_end_str) {
-        return ca_modifier; 
-      }
-      if (cur_token[cur_token_len - 1] != ']') {
-        return ca_none;
-      }
-      continue;
-    }
-    break;
-  }
-  if (cur_token_quoted) { return ca_none; }
-  if (cur_token_end_str) { return ca_command; }
-  if (*cur_token == '(') { return ca_extf; }
-  
-  struct command *command = commands;
-  int n = 0;
-  struct tgl_command;
-  while (command->name) {
-    if (is_same_word (cur_token, cur_token_len, command->name)) {
-      break;
-    }
-    n ++;
-    command ++;
-  }
-  
-  if (!command->name) {
-    return ca_none;
-  }
-
-  struct command_argument_desc *flags = command->args;
-  int first = 1;
-  while (1) {
-    enum command_argument op = (flags->type) & 255;
-    int opt = (flags->type) & ca_optional;
-    int period = (flags->type) & ca_period;
-
-    if (op == ca_none) { return ca_none; }
-    if (op == ca_string_end || op == ca_file_name_end || op == ca_msg_string_end) {
-      next_token_end_ac ();
-
-      if (cur_token_len < 0 || !cur_token_end_str) { 
-        return ca_none;
-      } else {
-        return op;
-      }
-    }
-    
-    char *save = line_ptr;
-    next_token ();
-
-    static char *token;
-    if (token) {
-      free (token);
-    }
-    if (cur_token_len <= 0) {
-      token = NULL;
-    } else {
-      token = strndup (cur_token, cur_token_len);
-    }
-
-    if (op == ca_user || op == ca_group || op == ca_secret_chat || op == ca_chat || op == ca_number || op == ca_double || op == ca_msg_id || op == ca_command || op == ca_channel || op == ca_media_type) {
-      if (cur_token_quoted) {
-        if (opt) {
-          line_ptr = save;
-          flags ++;
-          first = 1;
-          continue;
-        } else if (period) {
-          if (first) {
-            return ca_none;
-          } else {
-            line_ptr = save;
-            flags ++;
-            first = 1;
-            continue;
-          }
-        } else {
-          return ca_none;
-        }
-      } else {
-        if (cur_token_end_str) { return op; }
-        
-        int ok = 1;
-        switch (op) {
-        case ca_user:
-          ok = 1;
-          break;
-        case ca_group:
-          ok = 1;
-          break;
-        case ca_secret_chat:
-          ok = 1;
-          break;
-        case ca_channel:
-          ok = 1;
-          break;
-        case ca_chat:
-          ok = 1;
-          /*if (ok) {
-            autocomplete_peer = tgl_peer_get (TLS, cur_token_peer ());
-            autocomplete_id.peer_type = NOT_FOUND;
-          }*/
-          break;
-        case ca_number:
-          ok = (cur_token_int (token) != NOT_FOUND);
-          break;
-        case ca_msg_id:
-          ok = 1;
-          //ok = (cur_token_msg_id ().peer_type != 0);
-          /*if (ok) {
-            autocomplete_peer = NULL;
-            autocomplete_id = cur_token_msg_id ();
-          }*/
-          break;
-        case ca_double:
-          ok = (cur_token_double (token) != NOT_FOUND);
-          break;
-        case ca_command:
-          ok = cur_token_len > 0;
-          break;
-        case ca_media_type:
-          ok = cur_token_len > 0;
-          break;
-        default:
-          assert (0);
-        }
-
-        if (opt && !ok) {
-          line_ptr = save;
-          flags ++;
-          first = 1;
-          continue;
-        }
-        if (period && !ok) {
-          if (first) {
-            return ca_none;
-          } else {
-            line_ptr = save;
-            flags ++;
-            first = 1;
-            continue;
-          }
-        }
-        if (!ok) {
-          return ca_none;
-        }
-
-        if (!period) {
-          flags ++;
-          first = 1;
-        } else {
-          first = 0;
-        }
-        continue;
-      }
-    }
-    if (op == ca_string || op == ca_file_name || op == ca_media_type) {
-      if (cur_token_end_str) {
-        return op;
-      } else {
-        if (!period) {
-          flags ++;
-          first = 1;
-        } else {
-          first = 0;
-        }
-        continue;
-      }
-    }
-    assert (0);
-  }
-}
+enum command_argument get_complete_mode (void);
 
 int complete_string_list (char **list, int index, const char *text, ssize_t len, char **R) {
   index ++;
@@ -2068,21 +1983,6 @@ char *media_type_list[] = {
   "voice",
   NULL
 };
-
-int complete_media_type (int index, const char *text, ssize_t len, char **R) {
-  index ++;
-  while (media_type_list[index] && strncmp (media_type_list[index], text, len)) {
-    index ++;
-  }
-  if (media_type_list[index]) {
-    *R = strdup (media_type_list[index]);
-    assert (*R);
-    return index;
-  } else {
-    *R = 0;
-    return -1;
-  }
-}
 
 
 int complete_spec_message_answer (struct tdl_message *M, int index, const char *text, int len, char **R) {
@@ -2268,7 +2168,7 @@ char *command_generator (const char *text, int state) {
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_media_type:
-    index = complete_media_type (index, command_pos, command_len, &R);
+    index = complete_string_list (media_type_list, index, command_pos, command_len, &R);
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_user:
@@ -2335,32 +2235,6 @@ char *command_generator (const char *text, int state) {
     if (c) { rl_line_buffer[rl_point] = c; }
     return 0;
   }
-}
-
-int count = 1;
-void work_modifier (const char *s, ssize_t l) {
-  if (is_same_word (s, l, "[offline]")) {
-    offline_mode = 1;
-  }
-  if (sscanf (s, "[reply=%d]", &reply_id) >= 1) {
-  }
-  
-  if (is_same_word (s, l, "[html]")) {
-    do_html = 1;
-  }
-  if (is_same_word (s, l, "[disable_preview]")) {
-    disable_msg_preview = 1;
-  }
-  if (sscanf (s, "[id=%lld]", &query_id) >= 1) {
-  }
-
-  /*if (is_same_word (s, l, "[enable_preview]")) {
-    disable_msg_preview = TGL_SEND_MSG_FLAG_ENABLE_PREVIEW;
-  }*/
-#ifdef ALLOW_MULT
-  if (sscanf (s, "[x%d]", &count) >= 1) {
-  }
-#endif
 }
 
 void print_fail (struct in_command *cmd) {
@@ -3171,7 +3045,7 @@ void interpreter_chat_mode (struct in_command *cmd) {
     tdlib_view_messages (TLS, print_success_gw, NULL, cmd->chat_mode_chat->id, 1, &cmd->chat_mode_chat->top_message->id);
     
     union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, line, 0, disable_msg_preview, 1);
-    tdlib_send_message (TLS, print_msg_success_gw, cmd, cmd->chat_mode_chat->id, reply_id, 0, 0, NULL, content);
+    tdlib_send_message (TLS, print_msg_success_gw, cmd, cmd->chat_mode_chat->id, 0, 0, 0, NULL, content);
   }
 }
 
@@ -4041,6 +3915,46 @@ struct tgl_update_callback upd_cb = {
 
 };
 
+int parse_argument_modifier (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int opt = (D->type & ca_optional) | (D->type & ca_period);
+
+  char *save = line_ptr;
+  next_token ();
+  
+  if (cur_token_len < 0 || cur_token_quoted) {
+    A->str = NULL;
+    if (opt) {
+      line_ptr = save;
+      return -5;
+    }
+    return -1;
+  } else if (cur_token_end_str) {
+    if (cur_token_len >= 1 && cur_token[0] == '[') {
+      return -3;
+    } else {
+      if (opt) {
+        line_ptr = save;
+        return -5;
+      } else {
+        return -1;
+      }
+    }
+  } else {
+    if (cur_token_len >= 2 && cur_token[0] == '[' && cur_token[cur_token_len - 1] == ']') {
+      A->flags = 1;
+      A->str = strndup (cur_token, cur_token_len);
+      return 0;
+    } else {
+      if (opt) {
+        line_ptr = save;
+        return -5;
+      } else {
+        return -1;
+      }
+    }
+  }
+}
+
 int parse_argument_string (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
   int opt = (D->type & ca_optional) | (D->type & ca_period);
 
@@ -4049,9 +3963,10 @@ int parse_argument_string (struct in_command *cmd, struct arg *A, struct command
 
   if (cur_token_end_str || cur_token_len < 0) {
     A->str = NULL;
+    if (cur_token_end_str) { return -3; }
     if (opt) {
       line_ptr = save;
-      return 0;
+      return -5;
     }
     return -1;
   } else {
@@ -4079,13 +3994,28 @@ int parse_argument_number (struct in_command *cmd, struct arg *A, struct command
   char *save = line_ptr;
   next_token ();
 
-  if (cur_token_end_str || cur_token_len < 0) {
+  if (cur_token_quoted || cur_token_len < 0) {
     A->num = NOT_FOUND;
     if (opt) {
       line_ptr = save;
-      return 0;
+      return -5;
     }
     return -1;
+  } else if (cur_token_end_str) {
+    int i;
+    for (i = 0; i < cur_token_len; i++) {
+      if (cur_token[i] < '0' && cur_token[i] >= '9') {
+        if (i != 0 || cur_token[i] != '-') {
+          if (opt) {
+            line_ptr = save;
+            return -5;
+          }
+          return -1;
+        }
+      }
+    }
+    A->num = NOT_FOUND;
+    return -3;
   } else {
     char *token = strndup (cur_token, cur_token_len);
     A->num = cur_token_int (token);
@@ -4094,7 +4024,7 @@ int parse_argument_number (struct in_command *cmd, struct arg *A, struct command
     if (A->num == NOT_FOUND) {
       if (opt) {
         line_ptr = save;
-        return 0;
+        return -5;
       } else {
         return -1;
       }
@@ -4110,13 +4040,28 @@ int parse_argument_double (struct in_command *cmd, struct arg *A, struct command
   char *save = line_ptr;
   next_token ();
 
-  if (cur_token_end_str || cur_token_len < 0) {
+  if (cur_token_quoted || cur_token_len < 0) {
     A->dval = NOT_FOUND;
     if (opt) {
       line_ptr = save;
-      return 0;
+      return -5;
     }
     return -1;
+  } else if (cur_token_end_str) {
+    int i;
+    for (i = 0; i < cur_token_len; i++) {
+      if (cur_token[i] < '0' && cur_token[i] >= '9') {
+        if (cur_token[i] != '-' && cur_token[i] != 'e' && cur_token[i] != '.' && cur_token[i] != 'E') {
+          if (opt) {
+            line_ptr = save;
+            return -5;
+          }
+          return -1;
+        }
+      }
+    }
+    A->dval = NOT_FOUND;
+    return -3;
   } else {
     char *token = strndup (cur_token, cur_token_len);
     A->dval = cur_token_double (token);
@@ -4125,7 +4070,7 @@ int parse_argument_double (struct in_command *cmd, struct arg *A, struct command
     if (A->dval == NOT_FOUND) {
       if (opt) {
         line_ptr = save;
-        return 0;
+        return -5;
       } else {
         return -1;
       }
@@ -4141,13 +4086,16 @@ int parse_argument_msg_id (struct in_command *cmd, struct arg *A, struct command
   char *save = line_ptr;
   next_token ();
 
-  if (cur_token_end_str || cur_token_len < 0) {
+  if (cur_token_quoted || cur_token_len < 0) {
     A->msg_id.message_id = -1;
     if (opt) {
       line_ptr = save;
-      return 0;
+      return -5;
     }
     return -1;
+  } else if (cur_token_end_str) {
+    A->msg_id.message_id = -1;
+    return -3;
   } else {
     char *token = strndup (cur_token, cur_token_len);
     tdl_message_id_t id = cur_token_msg_id (token, cmd);
@@ -4161,7 +4109,7 @@ int parse_argument_msg_id (struct in_command *cmd, struct arg *A, struct command
     if (A->msg_id.message_id == -1) {
       if (opt) {
         line_ptr = save;
-        return 0;
+        return -5;
       } else {
         return -1;
       }
@@ -4178,13 +4126,16 @@ int parse_argument_chat (struct in_command *cmd, struct arg *A, struct command_a
   char *save = line_ptr;
   next_token ();
 
-  if (cur_token_end_str || cur_token_len < 0) {
+  if (cur_token_quoted || cur_token_len < 0) {
     A->chat = NULL;
     if (opt) {
       line_ptr = save;
-      return 0;
+      return -5;
     }
     return -1;
+  } else if (cur_token_end_str) {
+    A->chat = NULL;
+    return -3;
   } else {
     int m = -1;
     if (op == ca_user) { m = tdl_chat_type_user; }
@@ -4203,7 +4154,7 @@ int parse_argument_chat (struct in_command *cmd, struct arg *A, struct command_a
     if (!C) {
       if (opt) {
         line_ptr = save;
-        return 0;
+        return -5;
       } else {
         return -1;
       }
@@ -4228,8 +4179,9 @@ int parse_argument_any (struct in_command *cmd, struct arg *A, struct command_ar
   case ca_string:
   case ca_media_type:
   case ca_command:
-  case ca_modifier:
     return parse_argument_string (cmd, A, D);
+  case ca_modifier:
+    return parse_argument_modifier (cmd, A, D);
   case ca_file_name_end:
   case ca_string_end:
   case ca_msg_string_end:
@@ -4252,14 +4204,19 @@ int parse_argument_period (struct in_command *cmd, struct arg *A, struct command
   A->flags = 2;
 
   A->vec_len = 0;
-  A->vec = NULL;
+  A->vec = malloc (0);
+
+  int opt = D->type & ca_optional;
 
   struct arg T;
   while (1) {
     int r = parse_argument_any (cmd, &T, D);
     if (r == -2) { return r; }
-    if (r == -1) {
-      return A->vec_len ? 0 : -1;
+    if (r == -1 || r == -5) {
+      return A->vec_len ? 0 : (opt ? -5 : -1);
+    }
+    if (r == -3) {
+      return r;
     }
     A->vec = realloc (A->vec, sizeof (struct arg) * (A->vec_len + 1));
     A->vec[A->vec_len ++] = T;
@@ -4280,6 +4237,122 @@ void free_argument (struct arg *A) {
   free (A->vec);
 }
 
+void free_args_list (struct arg args[], int cnt) {
+  int i;
+  for (i = 0; i < cnt; i++) {
+    free_argument (&args[i]);
+  }
+}
+
+struct command_argument_desc carg_0 = { "modifiers", ca_modifier | ca_period | ca_optional };
+struct command_argument_desc carg_1 = { "command", ca_command };
+
+int parse_command_line (struct arg args[], struct in_command *cmd, int complete) {
+  //struct command_argument_desc *D = command->args;
+  //void (*fun)(struct command *, int, struct arg[], struct in_command *) = command->fun;
+  struct command *command = NULL;
+
+  int p = 0;  
+  int ok = 0;
+
+  int complete_mode = ca_none;
+
+  while (1) {
+    struct command_argument_desc *D;
+    if (p == 0) {
+      D = &carg_0;
+    } else if (p == 1) {
+      D = &carg_1;
+    } else {
+      D = &command->args[p - 2];
+    }
+    if (!D->type) {
+      break;
+    }
+    
+    int r;
+    if (D->type & ca_period) {
+      r = parse_argument_period (cmd, &args[p], D);
+    } else {
+      r = parse_argument_any (cmd, &args[p], D);
+    }
+
+    if (r == -5) {
+      assert (D->type & ca_optional);
+      r = 0;
+    }
+   
+    if (r == -3) {
+      if (!complete) {
+        if (D->type & ca_period) {
+          if (args[p].vec_len > 0 || (D->type & ca_optional)) {
+            r = 0;
+          }
+        } else if (D->type & ca_optional) {
+          r = 0;
+        }
+      } else {
+        complete_mode = D->type;
+      }
+    }
+
+    if (!r && p == 1) {
+      command = commands;      
+      while (command->name) {
+        if (!strcmp (command->name, args[p].str)) {
+          break;
+        }
+        command ++;
+      }
+      if (!command->name) {
+        r = -4;
+        if (!complete) {
+          fail_interface (TLS, cmd, ENOSYS, "unknown command %s", args[p].str);
+        }
+      }
+    }
+
+    p ++;
+
+    if (r == -1 && !complete) {
+      fail_interface (TLS, cmd, ENOSYS, "can not parse arg '%s'", D->name);
+    }
+
+    if (r == -3 && !complete) {
+      fail_interface (TLS, cmd, ENOSYS, "can not parse arg '%s': EOF", D->name);
+    }
+
+    if (r < 0) {
+      ok = r;
+      break;
+    }
+
+  }
+
+  if (!ok && !complete) {
+    next_token ();
+    if (cur_token_len != 0) {
+      fail_interface (TLS, cmd, ENOSYS, "too many args");
+      ok = -1;
+    }
+  }
+  return (complete) ? (ok == -3 ? complete_mode : ca_none) : ok;
+}
+
+enum command_argument get_complete_mode (void) {
+  line_ptr = rl_line_buffer;
+  force_end_mode = 0;
+
+  struct arg args[12];
+  memset (&args, 0, sizeof (args));
+
+  int res = parse_command_line (args, NULL, 1);
+  
+  free_args_list (args, 12);
+
+  return res;
+}
+
 void interpreter_ex (struct in_command *cmd) {  
   char *line = cmd->line;
   force_end_mode = 1;
@@ -4288,13 +4361,8 @@ void interpreter_ex (struct in_command *cmd) {
     return;
   }
 
-  query_id = 0;
-  do_html = 0;
   line_ptr = line;
-  offline_mode = 0;
-  reply_id = 0;
-  disable_msg_preview = 0;
-  count = 1;
+  
   if (!line) { 
     do_safe_quit (NULL, 0, NULL, NULL);
     return; 
@@ -4307,104 +4375,26 @@ void interpreter_ex (struct in_command *cmd) {
     add_history (line);
   }
 
-  while (1) {
-    next_token ();
-    if (cur_token_quoted) { 
-      fail_interface (TLS, cmd, ENOSYS, "can not parse modifier");
-      return; 
-    }
-
-    if (cur_token_len <= 0) { 
-      fail_interface (TLS, cmd, ENOSYS, "can not parse modifier");
-      return; 
-    }
-    
-    if (*cur_token == '[') {
-      if (cur_token_end_str) {
-        fail_interface (TLS, cmd, ENOSYS, "can not parse modifier");
-        return; 
-      }
-      if (cur_token[cur_token_len - 1] != ']') {
-        fail_interface (TLS, cmd, ENOSYS, "can not parse modifier");
-        return; 
-      }
-      work_modifier (cur_token, cur_token_len);
-      if (query_id) {
-        cmd->query_id = query_id;
-      }
-      continue;
-    }
-    break;
-  }
-  if (cur_token_quoted || cur_token_end_str) { 
-    fail_interface (TLS, cmd, ENOSYS, "can not parse command name");
-    return; 
-  }
-    
-    
-  
-  struct command *command = commands;
-  int n = 0;
-  struct tgl_command;
-  while (command->name) {
-    if (is_same_word (cur_token, cur_token_len, command->name)) {
-      break;
-    }
-    n ++;
-    command ++;
-  }
-  
-  if (!command->name) {
-    fail_interface (TLS, cmd, ENOSYS, "can not find command '%.*s'", (int)cur_token_len, cur_token);
-    return; 
-  }
-
-  struct arg args[10];
+  struct arg args[12];
   memset (&args, 0, sizeof (args));
 
-  struct command_argument_desc *D = command->args;
-  void (*fun)(struct command *, int, struct arg[], struct in_command *) = command->fun;
 
-  int p = 0;
-  int ok = 0;
-  while (D[p].type) {
-    int r;
-    if (D[p].type & ca_period) {
-      r = parse_argument_period (cmd, &args[p], &D[p]);
-    } else {
-      r = parse_argument_any (cmd, &args[p], &D[p]);
-    }
-    p ++;
+  int res = parse_command_line (args, cmd, 0);
 
-    if (r == -1) {
-      fail_interface (TLS, cmd, ENOSYS, "can not parse arg #%d", p);
+  if (!res) {
+    struct command *command = commands;    
+
+    while (command->name) {
+      if (!strcmp (command->name, args[1].str)) {
+        break;
+      }
+      command ++;
     }
 
-    if (r < 0) {
-      ok = r;
-      break;
-    }
-  }
-
-  if (!ok) {
-    next_token ();
-    if (!cur_token_end_str) {
-      fail_interface (TLS, cmd, ENOSYS, "too many args #%d", p);
-      ok = -1;
-    }
-  }
-
-  if (!ok) {
-    int z;
-    for (z = 0; z < count; z ++) {
-      fun (command, p, args, cmd);
-    }
+    command->fun (command, 12, args, cmd);
   }
   
-  int i;
-  for (i = 0; i < p; i++) {
-    free_argument (&args[i]);
-  }
+  free_args_list (args, 12);
 
   update_prompt ();
 }
