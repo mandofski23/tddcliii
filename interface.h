@@ -214,8 +214,20 @@ struct command {
   long params[10];
 };
 
+struct chat_alias {
+  char *name;
+  int type;
+  void *chat;
+  struct chat_alias *next, *prev;
+};
+
+struct chat_alias *get_by_alias (const char *name);
 //char *print_permanent_msg_id (tdl_message_id_t id);
 //char *print_permanent_peer_id (tgl_peer_id_t id);
 //tgl_peer_id_t parse_input_peer_id (const char *s, int l, int mask);
 //tdl_message_id_t parse_input_msg_id (const char *s, int l);
+void fail_interface (struct tdlib_state *TLS, struct in_command *cmd, int error_code, const char *format, ...) __attribute__ (( format (printf, 4, 5)));
+long long find_modifier (int arg_num, struct arg args[], const char *name, int type);
+
+#define NOT_FOUND (int)0x80000000
 #endif

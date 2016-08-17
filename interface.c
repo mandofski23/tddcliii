@@ -96,13 +96,6 @@ struct delayed_query {
   int mode;
 };
 
-struct chat_alias {
-  char *name;
-  int type;
-  void *chat;
-  struct chat_alias *next, *prev;
-};
-
 #define chat_alias_cmp(a,b) strcmp (a->name, b->name)
 DEFINE_TREE (chat_alias, struct chat_alias *, chat_alias_cmp, NULL)
 
@@ -1756,7 +1749,7 @@ void received_chat_history_slice (struct tdlib_state *TLS, void *extra, int succ
   
     if (e->current_pos > 0) {
       int id = e->list[0]->id;
-      tdlib_view_messages (TLS, NULL, NULL, e->chat_id, 1, &id);
+      tdlib_view_messages (TLS, tdcli_empty_cb, NULL, e->chat_id, 1, &id);
     }
     int i;
     for (i = 0; i < e->current_pos; i++) {
@@ -2003,7 +1996,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   //{"get_self", {ca_none}, do_get_self, "get_self \tGet our user info", NULL},
   {"group_upgrade", {{"group", ca_group}}, {{"chat", ra_chat}}, do_group_upgrade, print_chat_gw, "Upgrades group to supergroup", NULL, {}},
   
-  {"help", {{"command", ca_command | ca_optional}}, {{"text", ra_string}}, do_help, print_string_gw, "Prints this help", NULL, {}},
+  {"help", {{"command_name", ca_command | ca_optional}}, {{"text", ra_string}}, do_help, print_string_gw, "Prints this help", NULL, {}},
   
   {"history", {{"chat", ca_chat}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"messages", ra_message | ra_vector}}, do_history, print_msg_list_gw, "Prints messages with this peer. Also marks messages as read", NULL, {}},
   
@@ -4268,6 +4261,12 @@ enum command_argument get_complete_mode (void) {
 }
 
 void interpreter_ex (struct in_command *cmd) {  
+  #ifdef USE_JSON
+  if (enable_json) {
+    json_interpreter_ex (cmd);
+    return;
+  }
+  #endif
   char *line = cmd->line;
   force_end_mode = 1;
   if (cmd->chat_mode_chat) {
@@ -4324,6 +4323,9 @@ void interpreter_ex (struct in_command *cmd) {
 }
 
 void interpreter (char *line) {
+  if (!line) {
+    do_safe_quit (NULL, 0, NULL, NULL);
+  }
   struct in_command *cmd = malloc (sizeof (*cmd));
   memset (cmd, 0, sizeof (struct in_command));
   cmd->ev = NULL;
