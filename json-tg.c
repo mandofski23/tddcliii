@@ -990,5 +990,143 @@ json_t *json_pack_secret_chat (struct tdl_secret_chat *SC) {
   return json_object ();
 }
 
+void socket_answer_start (void);
+void socket_answer_add_printf (const char *format, ...) __attribute__ ((format (printf, 1, 2)));
+void socket_answer_end (struct in_ev *ev);
 
+#define mprintf(ev,...) \
+  if (ev) { socket_answer_add_printf (__VA_ARGS__); } \
+  else { printf (__VA_ARGS__); } 
+
+#define mprint_start(ev,...) \
+  if (!ev) { print_start (__VA_ARGS__); } \
+  else { socket_answer_start (); }
+  
+#define mprint_end(ev,...) \
+  if (!ev) { print_end (__VA_ARGS__); } \
+  else { socket_answer_end (ev); }
+
+#define mpush_color(ev,...) \
+  if (!ev) { push_color (__VA_ARGS__); }
+
+#define mpop_color(ev,...) \
+  if (!ev) { pop_color (__VA_ARGS__); }
+
+json_t *json_pack_res_arg (struct res_arg *A, struct result_argument_desc *D) {
+  int op = D->type & 127;
+  json_t *f;
+  switch (op) {
+    case ra_user:
+      f = json_pack_user (A->user);
+      break;
+    case ra_group:
+      f = json_pack_group (A->group);
+      break;
+    case ra_channel:
+      f = json_pack_channel (A->channel);
+      break;
+    case ra_secret_chat:
+      f = json_pack_secret_chat (A->secret_chat);
+      break;
+    case ra_peer:
+      switch (A->peer->type) {
+        case tdl_chat_type_user:
+          f = json_pack_user (A->user);
+          break;
+        case tdl_chat_type_group:
+          f = json_pack_group (A->group);
+          break;
+        case tdl_chat_type_channel:
+          f = json_pack_channel (A->channel);
+          break;
+        case tdl_chat_type_secret_chat:
+          f = json_pack_secret_chat (A->secret_chat);
+          break;
+      }
+      break;
+    case ra_chat:
+      f = json_pack_chat (A->chat);
+      break;
+    case ra_message:
+      f = json_pack_message (A->message);;
+      break;
+    case ra_int:
+      f = json_integer (A->num);;
+      break;
+    case ra_chat_member:
+      f = json_pack_chat_member (A->chat_member);
+      break;
+    case ra_string:
+      f = json_string (A->str);
+      break;
+    case ra_photo:
+      f = json_pack_media_photo (A->photo);
+      break;
+    case ra_invite_link_info:
+    case ra_none:
+    default:
+      f = json_false ();
+      break;
+  }
+  return f;
+}
+
+void json_universal_cb (struct in_command *cmd, int success, struct res_arg *args) {
+  if (!success) {
+    mprint_start (cmd->ev);
+    json_t *res = json_object ();
+    if (cmd->query_id) {
+      assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+    }
+    assert (json_object_set (res, "result", json_string ("FAIL")) >= 0);
+    assert (json_object_set (res, "error_code", json_integer (TLS->error_code)) >= 0);
+    assert (json_object_set (res, "error", json_string (TLS->error)) >= 0);
+    char *s = json_dumps (res, 0);
+    mprintf (cmd->ev, "%s\n", s);
+    json_decref (res);
+    free (s);
+    mprint_end (cmd->ev);
+
+    return;
+  }
+
+  json_t *res = json_object ();
+  if (cmd->query_id) {
+    assert (json_object_set (res, "query_id", json_integer (cmd->query_id)) >= 0);
+  }
+  json_t *result = json_object ();
+
+  struct command *C = cmd->cmd;
+
+  int i;
+  for (i = 0; i < 10; i++) {
+    if (!C->res_args[i].name) {
+      break;
+    }
+
+    json_t *f;
+
+    if (C->res_args[i].type & ra_vector) {
+      f = json_array ();
+
+      int j;
+      for (j = 0; j < args[i].vec_len; j++) {
+        json_t *x = json_pack_res_arg (&args[i].vec[j], &C->res_args[i]);
+        assert (json_array_append (f, x) >= 0);
+      }
+    } else {
+      f = json_pack_res_arg (&args[i], &C->res_args[i]);
+    }
+    assert (json_object_set (result, C->res_args[i].name, f) >= 0);
+  }
+
+  
+  mprint_start (cmd->ev);
+  assert (json_object_set (res, "result", result) >= 0);
+  char *s = json_dumps (res, 0);
+  mprintf (cmd->ev, "%s\n", s);
+  json_decref (res);
+  free (s);
+  mprint_end (cmd->ev);
+}
 #endif

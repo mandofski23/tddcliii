@@ -20,6 +20,7 @@
 #define __INTERFACE_H__
 
 #include "tdc/tdlib-c-bindings.h"
+#include "telegram-layout.h"
 
 union tdl_chat;
 
@@ -94,14 +95,124 @@ void play_sound (void);
 void update_prompt (void);
 void set_interface_callbacks (void);
 
+struct res_arg;
 struct in_command {
   char *line;
   struct in_ev *ev;
   int refcnt;
   long long query_id;
   struct tdl_chat_info *chat_mode_chat;
+  struct command *cmd;
+  void (*cb)(struct in_command *, int success, struct res_arg *args);
 };
 void in_command_decref (struct in_command *cmd);
+
+enum result_argument {
+  ra_none,
+  ra_user,
+  ra_group,
+  ra_secret_chat,
+  ra_channel,
+  ra_peer,
+  ra_chat,
+  ra_message,
+  ra_int,
+  ra_chat_member,
+  ra_string,
+  ra_photo,
+  ra_invite_link_info,
+ 
+  ra_vector = 128
+};
+
+struct result_argument_desc {
+  char *name;
+  enum result_argument type;
+};
+
+struct res_arg {
+  int flags;
+  union {
+    struct {
+      int vec_len;
+      struct res_arg *vec;
+    };
+    struct tdl_user *user;
+    struct tdl_group *group;
+    struct tdl_secret_chat *secret_chat;
+    struct tdl_channel *channel;
+    union tdl_chat *peer;
+    struct tdl_chat_info *chat;
+    struct tdl_message *message;
+    int num;
+    struct tdl_chat_member *chat_member;
+    char *str;
+    struct tdl_photo *photo;
+    struct tdl_chat_invite_link_info *invite_link_info;
+    void *ptr;
+  };
+};
+
+enum command_argument {
+  ca_none,
+  ca_user,
+  ca_group,
+  ca_secret_chat,
+  ca_channel,
+  ca_chat,
+  ca_file_name,
+  ca_file_name_end,
+  ca_number,
+  ca_string_end,
+  ca_msg_string_end,
+  ca_modifier,
+  ca_command,
+  ca_extf,
+  ca_msg_id,
+  ca_double,
+  ca_string,
+  ca_media_type,
+
+
+  ca_optional = 256,
+  ca_period = 512
+};
+
+struct command_argument_desc {
+  char *name;
+  enum command_argument type;
+};
+
+struct arg {
+  int flags;
+  union {
+    //tgl_peer_t *P;
+    //struct tdl_message *M;
+    char *str;
+    long long num;
+    double dval;
+    tdl_message_id_t msg_id;
+    //tgl_peer_id_t peer_id;
+    struct tdl_chat_info *chat;
+
+    struct {
+      int vec_len;
+      struct arg *vec;
+    };
+  };
+};
+
+typedef void (*tdlib_cb_t)(struct in_command *, int, struct res_arg *);
+struct command {
+  char *name;
+  struct command_argument_desc args[10];
+  struct result_argument_desc res_args[10];
+  void (*fun)(struct command *command, int arg_num, struct arg args[], struct in_command *cmd);
+  tdlib_cb_t default_cb;
+  char *desc;
+  void *arg;
+  long params[10];
+};
 
 //char *print_permanent_msg_id (tdl_message_id_t id);
 //char *print_permanent_peer_id (tgl_peer_id_t id);
