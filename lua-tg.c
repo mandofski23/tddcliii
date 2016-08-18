@@ -255,6 +255,8 @@ void lua_init (const char *file) {
     logprintf ("lua: %s\n",  lua_tostring (luaState, -1));
     exit (1);
   }
+
+  subscribe_updates (NULL, lua_update_cb);
 }
 
 #endif

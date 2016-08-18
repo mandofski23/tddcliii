@@ -237,6 +237,7 @@ struct chat_alias *get_by_alias (const char *name);
 //tdl_message_id_t parse_input_msg_id (const char *s, int l);
 void fail_interface (struct tdlib_state *TLS, struct in_command *cmd, int error_code, const char *format, ...) __attribute__ (( format (printf, 4, 5)));
 long long find_modifier (int arg_num, struct arg args[], const char *name, int type);
+struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void *, struct update_description *, struct res_arg []));
 
 #define NOT_FOUND (int)0x80000000
 #endif

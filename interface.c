@@ -2973,6 +2973,30 @@ int upd_str (char **a, char *b) {
   }
 }
 
+struct update_subscriber {
+  void *extra;
+  struct update_subscriber *next, *prev;
+  void (*cb)(void *extra, struct update_description *D, struct res_arg args[]);
+};
+
+struct update_subscriber update_subscribers_queue;
+
+struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void *, struct update_description *, struct res_arg [])) {
+  struct update_subscriber *Q = &update_subscribers_queue;
+  if (!Q->next) { 
+    Q->next = Q;
+    Q->prev = Q;
+  }
+  struct update_subscriber *a = malloc (sizeof (*a));
+  a->extra = extra;
+  a->cb = on_update;
+  a->next = Q;
+  a->prev = Q->prev;
+  a->next->prev = a;
+  a->prev->next = a;
+  return a;
+}
+
 void do_update (struct update_description *D, struct res_arg args[]) {
   if (!enable_json) {
     if (D->default_cb) {
@@ -2982,6 +3006,12 @@ void do_update (struct update_description *D, struct res_arg args[]) {
     #ifdef USE_JSON
     json_update_cb (NULL, D, args);
     #endif
+  }
+
+  struct update_subscriber *a = update_subscribers_queue.next;
+  while (a != &update_subscribers_queue) {
+    a->cb (a->extra, D, args);
+    a = a->next;
   }
 }
 
