@@ -49,6 +49,7 @@ set (TDCLI_SOURCE
   loop.c
   lua-tg.c
   json-tg.c
+  extension.c
 )
 
 

@@ -2973,11 +2973,29 @@ int upd_str (char **a, char *b) {
   }
 }
 
+void do_update (struct update_description *D, struct res_arg args[]) {
+  if (!enable_json) {
+    if (D->default_cb) {
+      D->default_cb (NULL, D, args);
+    }
+  } else {
+    #ifdef USE_JSON
+    json_update_cb (NULL, D, args);
+    #endif
+  }
+}
+
+void default_on_new_msg (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+  struct in_ev *ev = ev;
+
+  mprint_start (NULL);
+  print_message (NULL, args[0].message);
+  mprint_end (NULL);
+}
+
 void on_new_msg (struct tdlib_state *TLSR, struct tdl_message *M, int disable_notifications) {
   assert (TLSR == TLS);
-  #ifdef USE_LUA
-    lua_new_msg (M, disable_notifications);
-  #endif
   if (alert_sound && !disable_notifications) {
     play_sound ();
   }
@@ -2989,29 +3007,40 @@ void on_new_msg (struct tdlib_state *TLSR, struct tdl_message *M, int disable_no
     e->unread_count = C->unread_count;
   }
 
-  if (disable_output && !notify_ev) { return; }
-  struct in_ev *ev = notify_ev;
-  mprint_start (ev);
-  if (!enable_json) {
-    print_message (ev, M);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("new_message"));
-      json_object_set (a, "message", json_pack_message (M));
-      json_object_set (res, "update", a);
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].message = M;
+  args[1].num = disable_notifications;
 
-      char *s = json_dumps (res, 0);
-      mprintf (ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
-  mprint_end (ev);
+  static struct update_description D = {
+    {{"message", ra_message}, {"disable_notifications", ra_int}},
+    default_on_new_msg,
+    "new_msg"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+}
+
+void default_on_edit_msg (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
 }
 
 void on_edit_msg (struct tdlib_state *TLSR, struct tdl_message *M) {
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].message = M;
+
+  static struct update_description D = {
+    {{"message", ra_message}},
+    default_on_edit_msg,
+    "edit_msg"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
 }
 
 void add_alias_internal (struct telegram_cli_chat_extra *e, char *alias) {
@@ -3127,13 +3156,12 @@ char *generate_alias_username (char *username) {
   return s;
 }
 
-void on_user_update (struct tdlib_state *TLSR, struct tdl_user *U) {
-  struct in_ev *ev = notify_ev;
-  #ifdef USE_LUA
-    lua_user_update (U);
-  #endif
 
-  int creat = 0;
+void default_on_user_update (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+}
+
+void on_user_update (struct tdlib_state *TLSR, struct tdl_user *U) {
   struct telegram_cli_chat_extra *e = U->extra;
   if (!U->extra) {
     e = calloc (sizeof (*e), 1);
@@ -3145,8 +3173,6 @@ void on_user_update (struct tdlib_state *TLSR, struct tdl_user *U) {
     sprintf (s, "user#id%d", U->id);
     e->main_alias = strdup (s);
     add_alias_internal (e, s);
-
-    creat = 1;
   }
 
   char *u;
@@ -3160,42 +3186,27 @@ void on_user_update (struct tdlib_state *TLSR, struct tdl_user *U) {
     sub_alias_internal (e, e->name_alias, u);
     upd_str (&e->name_alias, u);
   }
+  
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].user = U;
 
-  if (disable_output && !notify_ev) { return; }
+  static struct update_description D = {
+    {{"user", ra_user}},
+    default_on_user_update,
+    "user_update"
+  };
 
-  if (!enable_json) {
-    if (!creat) {
-      mprint_start (ev);
-      mpush_color (ev, COLOR_YELLOW);
-      mprintf (ev, "User ");
-      print_user_name (ev, U, U->id);
-      mprintf (ev, " updated\n");
-      mpop_color (ev);
-      mprint_end (ev);
-    }
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("user"));
-      json_object_set (a, "user", json_pack_user (U));
-      json_object_set (res, "update", a);
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+}
+
+void default_on_group_update (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
 }
 
 void on_group_update (struct tdlib_state *TLSR, struct tdl_group *G) {
-  struct in_ev *ev = notify_ev;
-  #ifdef USE_LUA
-    lua_group_update (G);
-  #endif
-  
-  int creat = 0;
-  
   struct telegram_cli_chat_extra *e = G->extra;
   if (!G->extra) {
     e = calloc (sizeof (*e), 1);
@@ -3207,45 +3218,28 @@ void on_group_update (struct tdlib_state *TLSR, struct tdl_group *G) {
     sprintf (s, "group#id%d", G->id);
     e->main_alias = strdup (s);
     add_alias_internal (e, s);
-
-    creat = 1;
   }
+  
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].group = G;
 
-  if (disable_output && !notify_ev) { return; }
- 
-  if (!enable_json) {
-    if (!creat && e->owner != G) {
-      mprint_start (ev);
-      mpush_color (ev, COLOR_YELLOW);
-      mprintf (ev, "Group ");
-      struct tdl_chat_info *C = e->owner;
-      print_chat_name (ev, C, C->id);
-      mprintf (ev, " updated\n");
-      mpop_color (ev);
-      mprint_end (ev);
-    }
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("group"));
-      json_object_set (a, "group", json_pack_group (G));
-      json_object_set (res, "update", a);
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
+  static struct update_description D = {
+    {{"group", ra_group}},
+    default_on_group_update,
+    "group_update"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+}
+
+void default_on_channel_update (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
 }
 
 void on_channel_update (struct tdlib_state *TLSR, struct tdl_channel *Ch) {
-  struct in_ev *ev = notify_ev;
-  #ifdef USE_LUA
-    lua_channel_update (Ch);
-  #endif
-  
-  int creat = 0;
   struct telegram_cli_chat_extra *e = Ch->extra;
   if (!Ch->extra) {
     e = calloc (sizeof (*e), 1);
@@ -3257,8 +3251,6 @@ void on_channel_update (struct tdlib_state *TLSR, struct tdl_channel *Ch) {
     sprintf (s, "channel#id%d", Ch->id);
     e->main_alias = strdup (s);
     add_alias_internal (e, s);
-
-    creat = 1;
   }
 
   char *u;
@@ -3266,44 +3258,33 @@ void on_channel_update (struct tdlib_state *TLSR, struct tdl_channel *Ch) {
   u = generate_alias_username (Ch->username);
   sub_alias_internal (e, e->username_alias, u);
   upd_str (&e->username_alias, u);
-
-  if (disable_output && !notify_ev) { return; }
   
-  if (!enable_json) {
-    if (!creat && e->owner != Ch) {
-      mprint_start (ev);
-      mpush_color (ev, COLOR_YELLOW);
-      mprintf (ev, "Channel ");
-      struct tdl_chat_info *C = e->owner;
-      print_chat_name (ev, C, C->id);
-      mprintf (ev, " updated\n");
-      mpop_color (ev);
-      mprint_end (ev);
-    }
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("channel"));
-      json_object_set (a, "channel", json_pack_channel (Ch));
-      json_object_set (res, "update", a);
-      
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].channel = Ch;
+
+  static struct update_description D = {
+    {{"channel", ra_channel}},
+    default_on_channel_update,
+    "channel_update"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
 }
 
 void on_secret_chat_update (struct tdlib_state *TLSR, struct tdl_secret_chat *U) {}
+
+void default_on_chat_update (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+}
 
 void on_chat_update (struct tdlib_state *TLSR, struct tdl_chat_info *C) {
   #ifdef USE_LUA
     lua_chat_update (C);
   #endif
 
-  int creat = 0;
   struct telegram_cli_chat_extra *e = C->extra;
   if (!e) {
     if (!C->chat->extra) {
@@ -3328,8 +3309,6 @@ void on_chat_update (struct tdlib_state *TLSR, struct tdl_chat_info *C) {
     e->owner = C;
     e->owner_type = -1;
     upd_aliases_internal (e);
-
-    creat = 1;
   }
 
   assert (e);
@@ -3343,272 +3322,282 @@ void on_chat_update (struct tdlib_state *TLSR, struct tdl_chat_info *C) {
   e->unread_count = C->unread_count;
  
   
-  struct in_ev *ev = notify_ev;
-  if (disable_output && !notify_ev) { return; }
- 
-  if (!enable_json) {
-    if (!creat) {
-      mprint_start (ev);
-      mpush_color (ev, COLOR_YELLOW);
-      mprintf (ev, "Peer ");
-      print_chat_name (ev, C, C->id);
-      mprintf (ev, " updated\n");
-      mpop_color (ev);
-      mprint_end (ev);
-    }
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("chat"));
-      json_object_set (a, "chat", json_pack_chat (C));
-      json_object_set (res, "update", a);
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].chat = C;
 
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
+  static struct update_description D = {
+    {{"chat", ra_chat}},
+    default_on_chat_update,
+    "chat_update"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
 }
 
 void on_net_state_change (struct tdlib_state *TLS, enum tdl_connection_state new_state) {
-  #ifdef USE_LUA
-    lua_net_state_change (new_state);
-  #endif
   conn_state = new_state;
   update_prompt ();
 }
   
 void on_my_id (struct tdlib_state *TLS, int id) {
-  #ifdef USE_LUA
-    lua_my_id (id);
-  #endif
   assert (!TLS->my_id || TLS->my_id == id);
   TLS->my_id = id;
-}
   
-void on_type_notification(struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_user *U, union tdl_user_action *action) {
-  #ifdef USE_LUA
-    lua_type_notification (C, U, action);
-  #endif
-  struct in_ev *ev = notify_ev;
-  if (log_level < 2 || (disable_output && !notify_ev)) { return; }
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].num = id;
 
+  static struct update_description D = {
+    {{"id", ra_int}},
+    NULL,
+    "self_id"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+}
+ 
+void default_on_type_notification (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+  if (log_level < 2) { return; }
+
+  struct tdl_chat_info *C = args[0].chat;
+  struct tdl_user *U = args[1].user;
+
+  const char *type = args[2].str;
+  int progress = args[3].num;
+    
+  struct in_ev *ev = NULL;
   mprint_start (ev);
-  if (!enable_json) {
-    mpush_color (ev, COLOR_YELLOW);
-    print_date (notify_ev, time (0));
-    print_user_name (ev, U, U->id);
-    if (C->chat != (union tdl_chat *)U) {
-      mprintf (ev, " in ");
-      print_chat_name (ev, C, C->id);
-    }
-    mprintf (ev, " ");
-    switch (action->type) {
-      case tdl_message_typing_action_typing:
-        mprintf (ev, "is typing");
-        break;
-      case tdl_message_typing_action_cancel:
-        mprintf (ev, "deleted typed message");
-        break;
-      case tdl_message_typing_action_record_video:
-        mprintf (ev, "is recording video");
-        break;
-      case tdl_message_typing_action_upload_video:
-        mprintf (ev, "is uploading video: %d%%", action->upload.progress);
-        break;
-      case tdl_message_typing_action_record_voice:
-        mprintf (ev, "is recording voice message");
-        break;
-      case tdl_message_typing_action_upload_voice:
-        mprintf (ev, "is uploading voice message: %d%%", action->upload.progress);
-        break;
-      case tdl_message_typing_action_upload_photo:
-        mprintf (ev, "is uploading photo: %d%%", action->upload.progress);
-        break;
-      case tdl_message_typing_action_upload_document:
-        mprintf (ev, "is uploading document: %d%%", action->upload.progress);
-        break;
-      case tdl_message_typing_action_send_location:
-        mprintf (ev, "is choosing geo location: %d%%", action->upload.progress);
-        break;
-      case tdl_message_typing_action_choose_contact:
-        mprintf (ev, "is choosing contact: %d%%", action->upload.progress);
-        break;
-    }
-    mprintf (ev, "\n");
-    mpop_color (ev);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("typing"));
-      json_object_set (a, "user", json_pack_user (U));
-      json_object_set (a, "chat", json_pack_chat (C));
-      json_object_set (res, "update", a);
-
-      switch (action->type) {
-        case tdl_message_typing_action_typing:
-          json_object_set (a, "action", json_string ("typing"));
-          break;
-        case tdl_message_typing_action_cancel:
-          json_object_set (a, "action", json_string ("cancel"));
-          break;
-        case tdl_message_typing_action_record_video:
-          json_object_set (a, "action", json_string ("record_video"));
-          break;
-        case tdl_message_typing_action_upload_video:
-          json_object_set (a, "action", json_string ("upload_video"));
-          json_object_set (a, "progress", json_integer (action->upload.progress));
-          break;
-        case tdl_message_typing_action_record_voice:
-          json_object_set (a, "action", json_string ("record_voice"));
-          break;
-        case tdl_message_typing_action_upload_voice:
-          json_object_set (a, "action", json_string ("upload_voice"));
-          json_object_set (a, "progress", json_integer (action->upload.progress));
-          break;
-        case tdl_message_typing_action_upload_photo:
-          json_object_set (a, "action", json_string ("upload_photo"));
-          json_object_set (a, "progress", json_integer (action->upload.progress));
-          break;
-        case tdl_message_typing_action_upload_document:
-          json_object_set (a, "action", json_string ("upload_document"));
-          json_object_set (a, "progress", json_integer (action->upload.progress));
-          break;
-        case tdl_message_typing_action_send_location:
-          json_object_set (a, "action", json_string ("location"));
-          break;
-        case tdl_message_typing_action_choose_contact:
-          json_object_set (a, "action", json_string ("contact"));
-          break;
-      }
-      json_object_set (res, "update", a);
-
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
+  mpush_color (ev, COLOR_YELLOW);
+  print_date (notify_ev, time (0));
+  print_user_name (ev, U, U->id);
+  if (C->chat != (union tdl_chat *)U) {
+    mprintf (ev, " in ");
+    print_chat_name (ev, C, C->id);
   }
+  mprintf (ev, " ");
+
+  if (!strcmp (type, "typing")) {
+    mprintf (ev, "is typing");
+  } else if (!strcmp (type, "cancel")) {
+    mprintf (ev, "deleted typed message");
+  } else if (!strcmp (type, "record_video")) {
+    mprintf (ev, "is recording video");
+  } else if (!strcmp (type, "upload_video")) {
+    mprintf (ev, "is uploading video: progress %d%%", progress);
+  } else if (!strcmp (type, "record_voice")) {
+    mprintf (ev, "is recording voice message");
+  } else if (!strcmp (type, "upload_voice")) {
+    mprintf (ev, "is uploading voice message: progress %d%%", progress);
+  } else if (!strcmp (type, "upload_photo")) {
+    mprintf (ev, "is uploading photo: progress %d%%", progress);
+  } else if (!strcmp (type, "upload_document")) {
+    mprintf (ev, "is uploading document: progress %d%%", progress);
+  } else if (!strcmp (type, "send_location")) {
+    mprintf (ev, "is choosing geo location");
+  } else if (!strcmp (type, "contact_contact")) {
+    mprintf (ev, "is choosing contact");
+  }
+  mprintf (ev, "\n");
+  mpop_color (ev);
   mprint_end (ev);
 }
+
+void on_type_notification (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_user *U, union tdl_user_action *action) {
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].chat = C;
+  args[1].user = U;
+  args[3].num = 0;
+  args[2].flags = 1;
+  switch (action->type) {
+    case tdl_message_typing_action_typing:
+      args[2].str = strdup ("typing");
+      break;
+    case tdl_message_typing_action_cancel:
+      args[2].str = strdup ("cancel");
+      break;
+    case tdl_message_typing_action_record_video:
+      args[2].str = strdup ("record_video");
+      break;
+    case tdl_message_typing_action_upload_video:
+      args[2].str = strdup ("upload_video");
+      args[3].num = action->upload.progress;
+      break;
+    case tdl_message_typing_action_record_voice:
+      args[2].str = strdup ("record_voice");
+      break;
+    case tdl_message_typing_action_upload_voice:
+      args[2].str = strdup ("upload_voice");
+      args[3].num = action->upload.progress;
+      break;
+    case tdl_message_typing_action_upload_photo:
+      args[2].str = strdup ("upload_photo");
+      args[3].num = action->upload.progress;
+      break;
+    case tdl_message_typing_action_upload_document:
+      args[2].str = strdup ("upload_document");
+      args[3].num = action->upload.progress;
+      break;
+    case tdl_message_typing_action_send_location:
+      args[2].str = strdup ("send_location");
+      break;
+    case tdl_message_typing_action_choose_contact:
+      args[2].str = strdup ("choose_contact");
+      break;
+  }
+
+
+  static struct update_description D = {
+    {{"chat", ra_chat}, {"user", ra_user}, {"type", ra_string}, {"progress", ra_int}},
+    default_on_type_notification,
+    "type_notification"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+}
   
+void default_on_new_authorization (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+  struct in_ev *ev = NULL;
+  
+  mprint_start (ev);
+  mpush_color (ev, COLOR_REDB);
+  print_date (ev, time (0));
+  mprintf (ev, "New authorization: device '%s' location '%s'\n", args[0].str, args[1].str);
+  mpop_color (ev);
+  mprint_end (ev);
+}
+
 void on_new_authorization (struct tdlib_state *TLS, int date, const char *device, const char *location) {
-  #ifdef USE_LUA
-    lua_new_authorization (date, device, location);
-  #endif
-  struct in_ev *ev = notify_ev;
-  if (disable_output && !notify_ev) { return; }
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].str = strdup (device);
+  args[0].flags = 1;
+  args[1].str = strdup (location);
+  args[1].flags = 1;
+  args[2].num = date;
 
-  mprint_start (ev);
-  if (!enable_json) {
-    mpush_color (ev, COLOR_REDB);
-    print_date (notify_ev, time (0));
-    mprintf (ev, "New authorization: device '%s' location '%s'\n", device, location);
-    mpop_color (ev);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("new_authorization"));
-      json_object_set (a, "date", json_integer (date));
-      json_object_set (a, "device", json_string (device));
-      json_object_set (a, "location", json_string (location));
-      json_object_set (res, "update", a);
+  static struct update_description D = {
+    {{"device", ra_string}, {"location", ra_string}, {"date", ra_int}},
+    default_on_new_authorization,
+    "new_authorization"
+  };
 
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
-  mprint_end (ev);
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
 }
 
 void on_stickers_updated (struct tdlib_state *TLS) { return; }
 void on_saved_animations_updated(struct tdlib_state *TLS) { return; }
-  
-void on_user_status_update (struct tdlib_state *TLS, struct tdl_user *U) {
-  #ifdef USE_LUA
-    lua_user_status_update (U);
-  #endif
-  struct in_ev *ev = notify_ev;
-  if (log_level < 3 || (disable_output && !notify_ev)) { return; }
 
+void default_on_user_status_update (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+  if (log_level < 3) { return; }
+
+  struct in_ev *ev = NULL;
+
+  struct tdl_user *U = args[0].user;
   mprint_start (ev);
-  if (!enable_json) {
-    mpush_color (ev, COLOR_YELLOW);
+  mpush_color (ev, COLOR_YELLOW);
 
-    print_date (notify_ev, time (0));
-    print_user_name (ev, U, U->id);
-    mprintf (ev, " is now ");
-    print_user_status (ev, U->status);
-    mprintf (ev, "\n");
-    mpop_color (ev);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("user_status"));
-      json_object_set (a, "user", json_pack_user (U));
-      json_object_set (res, "update", a);
+  print_date (ev, time (0));
+  print_user_name (ev, U, U->id);
+  mprintf (ev, " is now ");
+  print_user_status (ev, U->status);
+  mprintf (ev, "\n");
+  mpop_color (ev);
 
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
+  mprint_end (ev);
+}
+
+void on_user_status_update (struct tdlib_state *TLS, struct tdl_user *U) {
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].user = U;
+
+  static struct update_description D = {
+    {{"user", ra_user}},
+    default_on_user_status_update,
+    "user_status"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+}
+
+void default_on_messages_deleted (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+  struct in_ev *ev = NULL;
+
+  struct tdl_chat_info *C = args[0].chat;
+  
+  mprint_start (ev);
+  mpush_color (ev, COLOR_YELLOW);
+  print_date (ev, time (0));
+  mprintf (ev, "Deleted %d messages from ", args[1].vec_len);
+  print_chat_name (ev, C, C->id);
+  mprintf (ev, "\n");
+  mpop_color (ev);
   mprint_end (ev);
 }
 
 void on_messages_deleted (struct tdlib_state *TLS, struct tdl_chat_info *C, int cnt, int *ids) {
-  #ifdef USE_LUA
-    lua_messages_deleted (C, cnt, ids);
-  #endif
-  struct in_ev *ev = notify_ev;
-  if (disable_output && !notify_ev) { return; }
-  
-  mprint_start (ev);
-  if (!enable_json) {
-    mpush_color (ev, COLOR_YELLOW);
-    print_date (notify_ev, time (0));
-    mprintf (ev, "Deleted %d messages from ", cnt);
-    print_chat_name (ev, C, C->id);
-    mprintf (ev, "\n");
-    mpop_color (ev);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("deleted_messages"));
-      json_t *arr = json_array ();
-      int i;
-      for (i = 0; i < cnt; i++) {
-        json_array_append (arr, json_integer (ids[i]));
-      }
-      json_object_set (a, "ids", arr);
-      json_object_set (a, "chat", json_pack_chat (C));
-      json_object_set (res, "update", a);
-
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].chat = C;
+  args[1].flags = 2;
+  args[1].vec_len = cnt;
+  args[1].vec = malloc (sizeof (struct res_arg) * cnt);
+  int i;
+  for (i = 0; i < cnt; i++) {
+    args[1].vec[i].num = ids[i];
   }
-  mprint_end (ev);
+
+  static struct update_description D = {
+    {{"chat", ra_chat}, {"ids", ra_int | ra_vector}},
+    default_on_messages_deleted,
+    "delete_messages"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
 }
 
 void on_reply_markup_updated (struct tdlib_state *TLS, struct tdl_chat_info *C) {}
-  
+ 
+
+void default_on_message_sent (void *extra, struct update_description *D, struct res_arg args[]) {
+  if (disable_output) { return; }
+
+  default_on_new_msg (extra, D, args);
+}
+
 void on_message_sent (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_message *M, int old_message_id) {
-  #ifdef USE_LUA
-    lua_message_sent (C, M, old_message_id, date);
-  #endif
-  on_new_msg (TLS, M, 1);
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].message = M;
+  args[1].num = old_message_id;
+
+  static struct update_description D = {
+    {{"message", ra_message}, {"old_id", ra_int}},
+    default_on_message_sent,
+    "message_sent"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
 }
   
 void on_message_failed (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_message *M, int error_code, const char *error) {}
@@ -3620,10 +3609,10 @@ void on_updated_message_views(struct tdlib_state *TLS, struct tdl_chat_info *C, 
 void on_updated_chat_top_message(struct tdlib_state *TLS, struct tdl_chat_info *C) {}
 void on_updated_chat_order(struct tdlib_state *TLS, struct tdl_chat_info *C) {}
   
+void default_on_updated_chat_title (void *extra, struct update_description *D, struct res_arg args[]) {
+}
+
 void on_updated_chat_title (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  #ifdef USE_LUA
-    lua_updated_chat_title (C);
-  #endif
   if (!C->extra) { return; }
   
   struct telegram_cli_chat_extra *e = C->extra;
@@ -3634,136 +3623,82 @@ void on_updated_chat_title (struct tdlib_state *TLS, struct tdl_chat_info *C) {
   sub_alias_internal (e, e->name_alias, u);
   upd_str (&e->name_alias, u);
 
-  if (enable_json) {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("chat_rename"));
-      json_object_set (a, "chat", json_pack_chat (C));
-      json_object_set (res, "update", a);
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].chat = C;
 
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
+  static struct update_description D = {
+    {{"chat", ra_chat}},
+    default_on_updated_chat_title,
+    "chat_update_title"
+  };
+
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+}
+  
+void default_on_updated_chat_photo (void *extra, struct update_description *D, struct res_arg args[]) {
 }
   
 void on_updated_chat_photo (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  #ifdef USE_LUA
-    lua_updated_chat_photo (C);
-  #endif
-  struct in_ev *ev = notify_ev;
-  if (disable_output && !notify_ev) { return; }
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].chat = C;
 
-  mprint_start (ev);
+  static struct update_description D = {
+    {{"chat", ra_chat}},
+    default_on_updated_chat_photo,
+    "chat_update_photo"
+  };
 
-  if (!enable_json) {
-    mpush_color (ev, COLOR_YELLOW);
+  do_update (&D, args);
 
-    print_date (notify_ev, time (0));
-    mprintf (ev, "Chat ");
-    print_chat_name (ev, C, C->id);
-    if (C->photo->big->id > 0) {
-      mprintf (ev, " updated photo");
-    } else {
-      mprintf (ev, " deleted photo");
-    }
-    mprintf (ev, "\n");
-    mpop_color (ev);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("chat_change_photo"));
-      json_object_set (a, "chat", json_pack_chat (C));
-      json_object_set (res, "update", a);
-
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
-  mprint_end (ev);
+  free_res_arg_list (args, 10);
 }
 
-void on_marked_read_inbox (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  #ifdef USE_LUA
-    lua_read_inbox (C);
-  #endif
-  struct in_ev *ev = notify_ev;
-  if (disable_output && !notify_ev) { return; }
-  if (log_level < 1) { return; }
-
-  mprint_start (ev);
-
-  if (!enable_json) {
-    mpush_color (ev, COLOR_YELLOW);
-
-    print_date (notify_ev, time (0));
-    mprintf (ev, "Chat ");
-    print_chat_name (ev, C, C->id);
-    mprintf (ev, ": read inbox");
-    mprintf (ev, "\n");
-    mpop_color (ev);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("chat_read_inbox"));
-      json_object_set (a, "chat", json_pack_chat (C));
-      json_object_set (res, "update", a);
-
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
-  mprint_end (ev);
+void default_on_read_inbox (void *extra, struct update_description *D, struct res_arg args[]) {
+}
   
+void on_marked_read_inbox (struct tdlib_state *TLS, struct tdl_chat_info *C) {
   struct telegram_cli_chat_extra *e = C->extra;
   total_unread += C->unread_count - e->unread_count;
   e->unread_count = C->unread_count;
+
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].chat = C;
+
+  static struct update_description D = {
+    {{"chat", ra_chat}},
+    default_on_read_inbox,
+    "chat_read_inbox"
+  };
+  
+  do_update (&D, args);
+
+  free_res_arg_list (args, 10);
+ 
+  update_prompt ();
 }
 
+void default_on_read_outbox (void *extra, struct update_description *D, struct res_arg args[]) {
+}
+  
 void on_marked_read_outbox (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  #ifdef USE_LUA
-    lua_read_outbox (C);
-  #endif
-  struct in_ev *ev = notify_ev;
-  if (disable_output && !notify_ev) { return; }
-  if (log_level < 1) { return; }
-    
-  mprint_start (ev);
+  struct res_arg args[10];
+  memset (&args, 0, sizeof (args));
+  args[0].chat = C;
 
-  if (!enable_json) {
-    mpush_color (ev, COLOR_YELLOW);
-    print_date (notify_ev, time (0));
+  static struct update_description D = {
+    {{"chat", ra_chat}},
+    default_on_read_outbox,
+    "chat_read_outbox"
+  };
+  
+  do_update (&D, args);
 
-    mprintf (ev, "Chat ");
-    print_chat_name (ev, C, C->id);
-    mprintf (ev, ": read outbox");
-    mprintf (ev, "\n");
-
-    mpop_color (ev);
-  } else {
-    #ifdef USE_JSON
-      json_t *res = json_object ();
-      json_t *a = json_object ();
-      json_object_set (a, "type", json_string ("chat_read_outbox"));
-      json_object_set (a, "chat", json_pack_chat (C));
-      json_object_set (res, "update", a);
-
-      char *s = json_dumps (res, 0);
-      mprintf (notify_ev, "%s\n", s);
-      json_decref (res);
-      free (s);
-    #endif
-  }
-  mprint_end (ev);
+  free_res_arg_list (args, 10);
 }
 
 void on_update_file_progress (struct tdlib_state *TLS, long long file_id, int size, int ready) {

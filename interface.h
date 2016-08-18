@@ -221,6 +221,12 @@ struct chat_alias {
   struct chat_alias *next, *prev;
 };
 
+struct update_description {
+  struct result_argument_desc res_args[10];
+  void (*default_cb)(void *extra, struct update_description *D, struct res_arg args[10]);
+  char *name;
+};
+
 struct chat_alias *get_by_alias (const char *name);
 //char *print_permanent_msg_id (tdl_message_id_t id);
 //char *print_permanent_peer_id (tgl_peer_id_t id);
