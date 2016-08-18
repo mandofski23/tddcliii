@@ -187,6 +187,7 @@ char *get_config_filename (void) {
 }
 
 char *make_full_path (char *s) {
+  assert (s);
   if (*s != '/') {
     char *t = make_path (get_home_directory (), s);
     free (s);
@@ -259,11 +260,7 @@ void parse_config_val (config_t *conf, char **s, char *param_name, const char *d
     if (path && default_name) {
       *s = make_path (path, default_name);
     } else {
-      if (path) {
-        *s = strdup (path);
-      } else {
-        *s  = default_name ? strdup (default_name) : NULL;
-      }
+      *s  = default_name ? strdup (default_name) : NULL;
     }
   }
 }
@@ -313,7 +310,7 @@ void parse_config (void) {
   
   char *config_directory;
 
-  parse_config_val (&conf, &config_directory, "config_directory", profile, CONFIG_DIRECTORY);
+  parse_config_val (&conf, &config_directory, "config_directory", profile ? profile : "", CONFIG_DIRECTORY);
   config_directory = make_full_path (config_directory);
   
   if (!disable_output) {
@@ -330,6 +327,7 @@ void parse_config (void) {
 
   if (!lua_file) {
     parse_config_val (&conf, &lua_file, "lua_script", 0, config_directory);
+    printf ("I: lua_file = '%s'\n", lua_file);
   }
   
   if (!python_file) {

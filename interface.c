@@ -3281,10 +3281,6 @@ void default_on_chat_update (void *extra, struct update_description *D, struct r
 }
 
 void on_chat_update (struct tdlib_state *TLSR, struct tdl_chat_info *C) {
-  #ifdef USE_LUA
-    lua_chat_update (C);
-  #endif
-
   struct telegram_cli_chat_extra *e = C->extra;
   if (!e) {
     if (!C->chat->extra) {

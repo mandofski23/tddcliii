@@ -220,14 +220,6 @@ void net_loop (void) {
       event_free (term_ev);
       term_ev = 0;
     }
-
-    #ifdef USE_LUA
-      lua_do_all ();
-    #endif
-    
-    #ifdef USE_PYTHON
-      py_do_all ();
-    #endif
     
     if (sigterm_cnt > 0) {
       do_halt (0);
@@ -331,14 +323,6 @@ static void accept_incoming (evutil_socket_t efd, short what, void *arg) {
 }
 
 void on_started (struct tdlib_state *TLS) {
-  #ifdef USE_LUA
-    lua_diff_end ();
-  #endif
-
-  #ifdef USE_PYTHON
-    py_diff_end ();
-  #endif
-  
   if (start_command) {
     safe_quit = 1;
     while (*start_command) {
@@ -505,14 +489,6 @@ int loop (void) {
     tgl_disable_link_preview (TLS);
   }*/
   tdlib_do_start (TLS);
-
-  #ifdef USE_LUA
-    lua_binlog_end ();
-  #endif
-  
-  #ifdef USE_PYTHON
-    py_binlog_end ();
-  #endif
   
   if (sfd >= 0) {
     struct event *ev = event_new (ev_base, sfd, EV_READ | EV_PERSIST, accept_incoming, 0);

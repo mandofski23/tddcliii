@@ -19,6 +19,8 @@
 #ifndef __INTERFACE_H__
 #define __INTERFACE_H__
 
+#include <stdlib.h>
+
 #include "tdc/tdlib-c-bindings.h"
 #include "telegram-layout.h"
 
@@ -103,6 +105,7 @@ struct in_command {
   long long query_id;
   struct tdl_chat_info *chat_mode_chat;
   struct command *cmd;
+  void *extra;
   void (*cb)(struct in_command *, int success, struct res_arg *args);
 };
 void in_command_decref (struct in_command *cmd);
