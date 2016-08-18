@@ -1,12 +1,14 @@
 #include <unistd.h>
 #include <stdio.h>
-#include "tdc/tdlib-c-bindings.h"
-#include "interface.h"
 #include <assert.h>
 #include <string.h>
+#include <stdlib.h>
 //format time:
 #include <time.h>
 #include <errno.h>
+
+#include "tdc/tdlib-c-bindings.h"
+#include "interface.h"
 #include "extension.h"
 
 extern struct tdlib_state *TLS;
@@ -1113,4 +1115,259 @@ void tdcb_universal_pack_update (struct tdcb_methods *T, struct update_descripti
   }
 
   T->new_field ("update"); 
+}
+
+int tdcb_parse_argument_modifier (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  if (!T->is_string ()) {
+    return -1;
+  }
+  
+  char *s = T->get_string ();
+
+  if (!s || strlen (s) < 2 || s[0] != '[' || s[strlen (s) - 1] != ']') {
+    free (s);
+    A->str = NULL;
+    return -1;
+  } else {
+    A->str = s;
+    A->flags = 1;
+    return 0;
+  }
+}
+
+int tdcb_parse_argument_string (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  if (!T->is_string ()) {
+    return -1;
+  }
+
+  A->str = T->get_string ();
+  A->flags = 1;
+  return 0;
+}
+
+int tdcb_parse_argument_long (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  if (!T->is_long ()) {
+    A->num = NOT_FOUND;
+    return -1;
+  }
+  
+  A->num = T->get_long ();
+  return 0;
+}
+
+int tdcb_parse_argument_double (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  if (!T->is_double ()) {
+    A->dval = NOT_FOUND;
+    return -1;
+  }
+  
+  A->dval = T->get_double ();
+  return 0;
+}
+
+tdl_message_id_t cur_token_msg_id (char *s, struct in_command *cmd);
+int tdcb_parse_argument_msg_id (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  if (!T->is_string ()) {
+    A->msg_id.message_id = -1;
+    return -1;
+  }
+
+  char *s = T->get_string ();
+  A->msg_id = cur_token_msg_id (s, NULL);
+  free (s);
+
+  return A->msg_id.message_id < 0 ? -1 : 0;
+}
+
+struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd);
+int tdcb_parse_argument_chat (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  if (!T->is_string ()) {
+    return -1;
+  }
+
+  char *s = T->get_string ();
+
+  int op = D->type & 255;
+    
+  int m = -1;
+  if (op == ca_user) { m = tdl_chat_type_user; }
+  if (op == ca_group) { m = tdl_chat_type_group; }
+  if (op == ca_channel) { m = tdl_chat_type_channel; }
+  if (op == ca_secret_chat) { m = tdl_chat_type_secret_chat; }            
+
+  A->chat = cur_token_peer (s, m, NULL);
+  free (s);
+
+  return A->chat ? 0 : -1;
+}
+
+int tdcb_parse_argument_any (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  int op = D->type & 255;
+
+  switch (op) {
+  case ca_user:
+  case ca_group:
+  case ca_secret_chat:
+  case ca_channel:
+  case ca_chat:
+    return tdcb_parse_argument_chat (T, cmd, A, D);
+  case ca_file_name:
+  case ca_string:
+  case ca_media_type:
+  case ca_command:
+  case ca_file_name_end:
+  case ca_string_end:
+  case ca_msg_string_end:
+    return tdcb_parse_argument_string (T, cmd, A, D);
+  case ca_modifier:
+    return tdcb_parse_argument_modifier (T, cmd, A, D);
+  case ca_number:
+    return tdcb_parse_argument_long (T, cmd, A, D);
+  case ca_double:
+    return tdcb_parse_argument_double (T, cmd, A, D);
+  case ca_msg_id:
+    return tdcb_parse_argument_msg_id (T, cmd, A, D);
+  case ca_none:
+  default:
+    logprintf ("type=%d\n", op);
+    assert (0);
+    return -1;
+  }
+}
+
+int tdcb_parse_argument_period (struct tdcb_methods *T, struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
+  if (!T->is_array ()) {
+    return -1;
+  }
+  A->flags = 2;
+
+  A->vec_len = 0;
+  A->vec = malloc (0);
+
+  struct arg AT;
+  int idx = 0;
+  for (idx = 0;;idx ++) {
+    T->get_arr_field (idx);
+
+    if (T->is_nil ()) {
+      T->pop ();
+      break;
+    }
+    
+    int r = tdcb_parse_argument_any (T, cmd, &AT, D);
+    T->pop ();
+    if (r == -1) {
+      return -1;
+    }
+    
+    A->vec = realloc (A->vec, sizeof (struct arg) * (A->vec_len + 1));
+    A->vec[A->vec_len ++] = AT;
+  }
+  
+  return 0;
+}
+
+void free_argument (struct arg *A);
+void free_args_list (struct arg args[], int cnt);
+
+extern struct command_argument_desc carg_0;
+extern struct command_argument_desc carg_1;
+extern struct command commands[];
+
+int tdcb_parse_command_line (struct tdcb_methods *T, struct arg args[], struct in_command *cmd) {
+  //struct command_argument_desc *D = command->args;
+  //void (*fun)(struct command *, int, struct arg[], struct in_command *) = command->fun;
+  struct command *command = NULL;
+
+  int p = 0;  
+  int ok = 0;
+
+  while (1) {
+    struct command_argument_desc *D;
+    if (p == 0) {
+      D = &carg_0;
+    } else if (p == 1) {
+      D = &carg_1;
+    } else {
+      D = &command->args[p - 2];
+    }
+    if (!D->type) {
+      break;
+    }
+
+    T->get_field (D->name);
+
+    if (T->is_nil ()) {
+      if (!(D->type & ca_optional)) {
+        fail_interface (TLS, cmd, ENOSYS, "can not parse arg '%s'", D->name);
+        ok = -1;
+      } else {
+        if (D->type & ca_period) {
+          tdcb_parse_argument_period (T, cmd, &args[p], D);
+        } else {
+          tdcb_parse_argument_any (T, cmd, &args[p], D);
+        }
+      }
+    } else {
+      int r;
+      if (D->type & ca_period) {
+        r = tdcb_parse_argument_period (T, cmd, &args[p], D);
+      } else {
+        r = tdcb_parse_argument_any (T, cmd, &args[p], D);
+      }
+      if (r < 0) {
+        fail_interface (TLS, cmd, ENOSYS, "can not parse arg '%s'", D->name);
+        ok = r;
+      }
+    }
+
+    T->pop ();
+    if (ok < 0) { break; }
+
+    if (p == 1) {
+      command = commands;      
+      while (command->name) {
+        if (!strcmp (command->name, args[p].str)) {
+          break;
+        }
+        command ++;
+      }
+      if (!command->name) {
+        fail_interface (TLS, cmd, ENOSYS, "unknown command %s", args[p].str);
+        ok = -1;
+        break;
+      }
+    }
+
+    p ++;
+  }
+
+  return ok;
+}
+
+void tdcb_run_command (struct tdcb_methods *T, struct in_command *cmd) {  
+  struct arg args[12];
+  memset (&args, 0, sizeof (args));
+  
+  int res = tdcb_parse_command_line (T, args, cmd);
+
+  if (!res) {
+    struct command *command = commands;    
+
+    while (command->name) {
+      if (!strcmp (command->name, args[1].str)) {
+        break;
+      }
+      command ++;
+    }
+
+    cmd->query_id = (int)find_modifier (args[0].vec_len, args[0].vec, "id", 2);
+    int count = (int)find_modifier (args[0].vec_len, args[0].vec, "x", 1);
+    if (!count) { count = 1; }
+    cmd->cmd = command;
+
+    command->fun (command, 12, args, cmd);
+  }
+  
+  free_args_list (args, 12);
 }
