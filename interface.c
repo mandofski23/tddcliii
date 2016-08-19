@@ -1403,6 +1403,18 @@ void do_change_username (struct command *command, int arg_num, struct arg args[]
 
 /* {{{ WORKING WITH GROUP CHATS */
 
+void do_mute (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
+  cmd->refcnt ++;
+
+  union tdl_notification_settings_scope *scope = tdlib_create_notification_settings_scope (TLS, tdl_notification_settings_scope_chat, args[2].chat->id);
+  
+  int mute_for = (command->params[0]) ? (int)(args[3].num == NOT_FOUND ? 3600 : args[3].num) : 0;
+  struct tdl_chat_info *C = args[2].chat;
+  struct tdl_notification_settings *settings = tdlib_create_notification_settings (TLS, mute_for, C->notification_settings ? C->notification_settings->sound : "default", 0);
+  
+  tdlib_set_notification_settings (TLS, tdcli_empty_cb, cmd, scope, settings);
+}
+
 void do_chat_change_photo (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   cmd->refcnt ++;
   long long chat_id = args[2].chat->id;
@@ -2025,6 +2037,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"main_session", {}, {}, do_main_session, print_success_gw, "Sends updates to this connection (or terminal). Useful only with listening socket", NULL, {}},
   {"mark_read", {{"chat", ca_chat}}, {}, do_mark_read, print_success_gw, "Marks messages with peer as read", NULL, {}},
   {"msg", {{"chat", ca_chat}, {"text", ca_msg_string_end}}, {{"message", ra_message}}, do_msg, print_msg_success_gw, "Sends text message to peer", NULL, {0}},
+  {"mute", {{"chat", ca_chat}, {"mute_for", ca_number}}, {}, do_mute, print_success_gw, "mutes chat for specified number of seconds (default 60)", NULL, {1}},
   
 
   {"resolve_username", {{"username", ca_string}}, {{"peer", ra_peer}}, do_resolve_username, print_peer_gw, "Find chat by username", NULL, {}},
@@ -2047,6 +2060,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   { "timer", {{"timeout", ca_double}}, {}, do_timer, print_success_gw, "sets timer (in seconds)", NULL, {}},
 
   {"unblock_user", {{"user", ca_user}}, {}, do_unblock_user, print_success_gw, "Unblocks user", NULL, {}},
+  {"unmute", {{"chat", ca_chat}}, {}, do_mute, print_success_gw, "unmutes chat", NULL, {0}},
 
   {"version", {}, {{"text", ra_string}}, do_version, print_string_gw, "Prints client and library version", NULL, {}},
 
@@ -3031,7 +3045,7 @@ void do_update (struct update_description *D, struct res_arg args[]) {
   }
 
   struct update_subscriber *a = update_subscribers_queue.next;
-  while (a != &update_subscribers_queue) {
+  while (a && a != &update_subscribers_queue) {
     a->cb (a->extra, D, args);
     a = a->next;
   }
