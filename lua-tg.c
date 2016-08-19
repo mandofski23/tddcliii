@@ -204,7 +204,7 @@ void lua_universal_cb (struct in_command *cmd, int success, struct res_arg *args
 
 void lua_update_cb (void *extra, struct update_description *D, struct res_arg args[]) {
   lua_settop (luaState, 0);
-  lua_getglobal (luaState, "tdc_update_callback");
+  lua_getglobal (luaState, "tdcli_update_callback");
   tdcb_universal_pack_update (&tdcb_lua_methods, D, args);
   
   int r = ps_lua_pcall (luaState, 1, 0, 0);
