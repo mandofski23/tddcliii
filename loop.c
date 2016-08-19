@@ -61,8 +61,7 @@
 
 #include <pthread.h>
 
-struct event_base *ev_base;
-
+struct event_base *ev_base; 
 int read_pipe;
 int write_pipe;
 

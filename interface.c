@@ -79,6 +79,8 @@
 
 #include "tree.h"
 
+extern struct event_base *ev_base;
+
 int total_unread;
 int disable_msg_preview;
 
@@ -989,6 +991,24 @@ void tdcli_vec_ptr_total_cb (struct tdlib_state *TLS, void *extra, int success, 
 }
 
 /* {{{ client methods */
+
+void on_timer_alarm (evutil_socket_t fd, short what, void *arg) {
+  tdcli_empty_cb (TLS, arg, 1);
+}
+
+void do_timer (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
+  cmd->refcnt ++;
+
+  struct event *ev = evtimer_new (ev_base, on_timer_alarm, cmd);
+
+  double x = args[2].dval;
+  struct timeval tv;
+  tv.tv_sec = (int)x;
+  x -= (int)x;
+  tv.tv_usec = (int)(x * 1000000);
+  event_add (ev, &tv);
+}
+
 void do_help (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   #define BL (1 << 14)
   char s[BL];
@@ -2024,6 +2044,8 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   
   {"start_bot", {{"user", ca_user}, {"chat", ca_chat}, {"data", ca_string}}, {{"message", ra_message}}, do_start_bot, print_msg_success_gw, "Adds bot to chat", NULL, {}},
 
+  { "timer", {{"timeout", ca_double}}, {}, do_timer, print_success_gw, "sets timer (in seconds)", NULL, {}},
+
   {"unblock_user", {{"user", ca_user}}, {}, do_unblock_user, print_success_gw, "Unblocks user", NULL, {}},
 
   {"version", {}, {{"text", ra_string}}, do_version, print_string_gw, "Prints client and library version", NULL, {}},
@@ -2394,7 +2416,7 @@ void print_success (struct in_command *cmd) {
     if (cmd->query_id) {
       mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
     }
-    mprintf (cmd, "SUCCESS\n");
+    mprintf (cmd->ev, "SUCCESS\n");
     mprint_end (cmd->ev);
   }
 }
