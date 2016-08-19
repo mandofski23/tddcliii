@@ -68,7 +68,13 @@ void tdcb_lua_pack_string (const char *s) {
 
 void tdcb_lua_pack_long (long long x) {
   my_lua_checkstack (1);
-  lua_pushinteger (luaState, x);
+  if (x == (int)x) {
+    lua_pushinteger (luaState, x);
+  } else {
+    char s[22];
+    sprintf (s, "%lld", x);
+    lua_pushstring (luaState, s);
+  }
 }
 
 void tdcb_lua_pack_double (double x) {
@@ -110,7 +116,7 @@ int tdcb_lua_is_string (void) {
 }
 
 int tdcb_lua_is_long (void) {
-  return lua_isnumber (luaState, -1);
+  return lua_isstring (luaState, -1) || lua_isnumber (luaState, -1);
 }
 
 int tdcb_lua_is_double (void) {
@@ -135,7 +141,11 @@ char *tdcb_lua_get_string (void) {
 }
 
 long long tdcb_lua_get_long (void) {
-  return lua_tointeger (luaState, -1);
+  if (lua_isnumber (luaState, -1)) {
+    return lua_tointeger (luaState, -1);
+  } else {
+    return atoll (lua_to_string (luaState, -1));
+  }
 }
 
 double tdcb_lua_get_double (void) {
