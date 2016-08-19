@@ -1993,7 +1993,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"chat_create_broadcast", {{"title", ca_string}, {"about", ca_string}}, {{"chat", ra_chat}}, do_channel_create, print_chat_gw, "Creates broadcast channel", NULL, {1, 0}},
   {"chat_create_group", {{"title", ca_string}, {"members", ca_user | ca_period}}, {{"chat", ra_chat}}, do_group_create, print_chat_gw, "Creates group chat", NULL, {}},
   {"chat_create_supergroup", {{"title", ca_string}, {"about", ca_string}}, {{"chat", ra_chat}}, do_channel_create, print_chat_gw, "Creates supergroup channel", NULL, {0, 1}},
-  {"chat_export_invite_link", {{"chat", ca_chat}}, {{"link", ca_string}}, do_chat_export_link, print_string_gw, "Exports new invite link (and invalidates previous)", NULL, {}}, 
+  {"chat_export_invite_link", {{"chat", ca_chat}}, {{"link", ra_string}}, do_chat_export_link, print_string_gw, "Exports new invite link (and invalidates previous)", NULL, {}}, 
   {"chat_import_invite_link", {{"link", ca_string}}, {}, do_chat_import_link, print_success_gw, "Get chat by invite link and joins if possible", NULL, {}}, 
   
   {"chat_with_peer", {{"chat", ca_chat}}, {}, do_chat_with_peer, print_success_gw, "Interface option. All input will be treated as messages to this peer. Type /quit to end this mode", NULL, {}},
