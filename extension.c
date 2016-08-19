@@ -649,6 +649,8 @@ void tdcb_pack_message (struct tdcb_methods *T, struct tdl_message *M) {
   tdcb_pack_message_id (T, C->id, M->id);
   T->new_field ("id");
   
+  tdcb_field ("chat_id", pack_long (M->chat_id));
+  
   if (M->sender_user_id) {
     tdcb_field ("sender_user_id", pack_long (M->sender_user_id));
   }
