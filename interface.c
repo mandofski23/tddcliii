@@ -1638,11 +1638,9 @@ void do_dialog_list (struct command *command, int arg_num, struct arg args[], st
 void do_resolve_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   cmd->refcnt ++;
   
-  void **T = malloc (sizeof (void *) * 2);
-  T[0] = cmd;
   char *u = args[2].str;
   if (*u == '@') { u ++; }
-  tdlib_search_public_chat (TLS, (void *)tdcli_ptr_cb, T, u);
+  tdlib_search_public_chat (TLS, (void *)tdcli_ptr_cb, cmd, u);
 }
 
 void do_contact_list (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
