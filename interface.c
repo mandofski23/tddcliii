@@ -3560,7 +3560,7 @@ void on_messages_deleted (struct tdlib_state *TLS, struct tdl_chat_info *C, int 
   args[0].chat = C;
   args[1].flags = 2;
   args[1].vec_len = cnt;
-  args[1].vec = malloc (sizeof (struct res_arg) * cnt);
+  args[1].vec = calloc (sizeof (struct res_arg), cnt);
   int i;
   for (i = 0; i < cnt; i++) {
     args[1].vec[i].num = ids[i];
