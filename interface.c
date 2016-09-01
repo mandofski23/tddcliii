@@ -595,32 +595,6 @@ void process_with_query_resolve_chat (struct tdlib_state *TLSR, void *extra, int
   process_with_query (extra, success);
 }
 
-void process_with_query_resolve_channel (struct tdlib_state *TLSR, void *extra, int success, struct tdl_channel *Ch) {
-  if (success && Ch) {
-    tdlib_create_channel_chat (TLS, process_with_query_resolve_chat, extra, Ch->id);
-    return;
-  }
-
-  stop_query (extra);
-}
-
-void process_with_query_resolve_user (struct tdlib_state *TLSR, void *extra, int success, struct tdl_user *U) {
-  if (success && U) {
-    tdlib_create_private_chat (TLS, process_with_query_resolve_chat, extra, U->id);
-    return;
-  }
-  struct delayed_query *q = extra;
-  if (q->action == 2 && (q->mode < 0 || q->mode == tdl_chat_type_channel)) {
-    char *s = q->token;
-    q->token = NULL;
-    tdlib_search_channel (TLS, process_with_query_resolve_channel, q, s);      
-    free (s);
-    return;
-  }
-
-  stop_query (q);
-}
-
 struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd) {
   if (!s) {
     return NULL;
@@ -686,20 +660,9 @@ struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd)
     q->cmd = cmd;
     q->action = 2;
     q->mode = mode;
-
-    if (mode < 0 || mode == tdl_chat_type_user) {
-      q->token = strdup (s + 1);
-      tdlib_search_user (TLS, process_with_query_resolve_user, q, q->token);
-      return (void *)-1l;
-    } else if (mode == tdl_chat_type_channel) {
-      q->action = 3;
-      tdlib_search_channel (TLS, process_with_query_resolve_channel, q, q->token);
-      return (void *)-1l;
-    } else {
-      in_command_decref (cmd);
-      free (q);
-      return NULL;
-    }
+      
+    tdlib_search_public_chat (TLS, process_with_query_resolve_chat, q, q->token);
+    return (void *)-1l;
   }
 
   char *f[3] = { "user#id", "group#id", "channel#id" };
@@ -1672,25 +1635,6 @@ void do_dialog_list (struct command *command, int arg_num, struct arg args[], st
   tdlib_get_chats (TLS, (void *)tdcli_vec_ptr_cb, cmd, (1ull << 63) - 1 - offset, 0, limit);
 }
 
-void do_resolve_username_cb2 (struct tdlib_state *TLS, void *ev, int success, struct tdl_channel *U) {
-  if (!success) {
-    tdcli_ptr_cb (TLS, ev, 0, NULL);
-  } else {
-    tdlib_create_channel_chat (TLS, (void *)tdcli_ptr_cb, ev, U->id);
-  }
-}
-
-void do_resolve_username_cb (struct tdlib_state *TLS, void *ev, int success, struct tdl_user *U) {
-  void **T = ev;
-  if (success) {
-    tdcli_ptr_cb (TLS, T[0], success, U);
-  } else {
-    tdlib_search_channel (TLS, do_resolve_username_cb2, T[0], T[1]);
-  }
-  free (T[1]);
-  free (T);
-}
-
 void do_resolve_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   cmd->refcnt ++;
   
@@ -1698,8 +1642,7 @@ void do_resolve_username (struct command *command, int arg_num, struct arg args[
   T[0] = cmd;
   char *u = args[2].str;
   if (*u == '@') { u ++; }
-  T[1] = strdup (u);
-  tdlib_search_user (TLS, do_resolve_username_cb, T, u);
+  tdlib_search_public_chat (TLS, (void *)tdcli_ptr_cb, T, u);
 }
 
 void do_contact_list (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
