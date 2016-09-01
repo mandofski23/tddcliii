@@ -1983,7 +1983,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"mute", {{"chat", ca_chat}, {"mute_for", ca_number}}, {}, do_mute, print_success_gw, "mutes chat for specified number of seconds (default 60)", NULL, {1}},
   
 
-  {"resolve_username", {{"username", ca_string}}, {{"peer", ra_peer}}, do_resolve_username, print_peer_gw, "Find chat by username", NULL, {}},
+  {"resolve_username", {{"username", ca_string}}, {{"chat", ra_chat}}, do_resolve_username, print_chat_gw, "Find chat by username", NULL, {}},
   
   {"reply", {{"msg_id", ca_msg_id}, {"text", ca_msg_string_end}}, {{"message", ra_message}}, do_msg, print_msg_success_gw, "Sends text message to peer", NULL, {1}},  
   {"reply_file", {{"msg_id", ca_msg_id}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, {{"message", ra_message}}, do_send_file, print_msg_success_gw, "Replies to peer with file", NULL, {1}},
