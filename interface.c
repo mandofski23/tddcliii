@@ -3278,7 +3278,9 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateNewMessage:
     {
       struct TdUpdateNewMessage *U = (void *)Upd;
+      mprint_start (ev);
       print_message (ev, U->message_);
+      mprint_end (ev);
       if (alert_sound && !U->disable_notification_) {
         play_sound ();
       }
@@ -3287,7 +3289,9 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateMessageSendSucceeded:
     {
       struct TdUpdateNewMessage *U = (void *)Upd;
+      mprint_start (ev);
       print_message (ev, U->message_);
+      mprint_end (ev);
     }
     break;
   case CODE_UpdateMessageSendFailed:
