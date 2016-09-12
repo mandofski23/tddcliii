@@ -5482,28 +5482,28 @@ void print_contact (struct in_ev *ev, struct TdContact *C) {
 
 void print_message_animation (struct in_ev *ev, struct TdMessageAnimation *animation) {
   if (animation->caption_) {
-    mprintf ("%s ", animation->caption_);
+    mprintf (ev, "%s ", animation->caption_);
   }
   print_animation (ev, animation->animation_);
 }
 
 void print_message_audio (struct in_ev *ev, struct TdMessageAudio *audio) {
   if (audio->caption_) {
-    mprintf ("%s ", audio->caption_);
+    mprintf (ev, "%s ", audio->caption_);
   }
   print_audio (ev, audio->audio_);
 }
 
 void print_message_document (struct in_ev *ev, struct TdMessageDocument *document) {
   if (document->caption_) {
-    mprintf ("%s ", document->caption_);
+    mprintf (ev, "%s ", document->caption_);
   }
   print_document (ev, document->document_);
 }
 
 void print_message_photo (struct in_ev *ev, struct TdMessagePhoto *photo) {
   if (photo->caption_) {
-    mprintf ("%s ", photo->caption_);
+    mprintf (ev, "%s ", photo->caption_);
   }
   print_photo (ev, photo->photo_);
 }
@@ -5514,14 +5514,14 @@ void print_message_sticker (struct in_ev *ev, struct TdMessageSticker *sticker) 
 
 void print_message_video (struct in_ev *ev, struct TdMessageVideo *video) {
   if (video->caption_) {
-    mprintf ("%s ", video->caption_);
+    mprintf (ev, "%s ", video->caption_);
   }
   print_video (ev, video->video_);
 }
 
 void print_message_voice (struct in_ev *ev, struct TdMessageVoice *voice) {
   if (voice->caption_) {
-    mprintf ("%s ", voice->caption_);
+    mprintf (ev, "%s ", voice->caption_);
   }
   print_voice (ev, voice->voice_);
 }
