@@ -56,7 +56,7 @@
 
 #include "loop.h"
 
-#include "tdc/tdlib-c-bindings.h"
+//#include "td/libtd/src/main/jni/td/telegram/td_c_client.h"
 #include "telegram-layout.h"
 
 
@@ -79,14 +79,14 @@
 
 #include "tree.h"
 
+
 extern struct event_base *ev_base;
 
 int total_unread;
 int disable_msg_preview;
+int my_id;
 
-void empty_cb (struct tdlib_state *TLS, void *extra, int success) {}
-
-enum tdl_connection_state conn_state;
+char * conn_state;
 
 struct delayed_query {
   struct in_command *cmd;
@@ -98,9 +98,472 @@ struct delayed_query {
   int mode;
 };
 
+struct tdcli_peer {
+  long long chat_id;
+  int peer_type;
+  int peer_id;
+  struct TdChat *chat;
+  union {
+    struct TdUser *user;
+    struct TdGroup *group;
+    struct TdChannel *channel;
+    struct TdSecretChat *secret_chat;
+  };
+  union {
+    struct TdUserFull *user_full;
+    struct TdGroupFull *group_full;
+    struct TdChannelFull *channel_full;
+    struct TdSecretChatFull *secret_chat_full;
+  };
+  
+  char *main_alias;
+  char *name_alias;
+  char *username_alias;
+
+  int aliases_cnt;
+  char **aliases;
+
+  int unread_count;
+};
+
+static int tdcli_peer_cmp_chat_id (struct tdcli_peer *a, struct tdcli_peer *b) {
+  if (a->chat_id < b->chat_id) { return -1; }
+  if (a->chat_id > b->chat_id) { return 1; }
+  return 0;
+}
+
+static int tdcli_peer_cmp_peer_id (struct tdcli_peer *a, struct tdcli_peer *b) {
+  if (a->peer_id < b->peer_id) { return -1; }
+  if (a->peer_id > b->peer_id) { return 1; }
+  if (a->peer_type < b->peer_type) { return -1; }
+  if (a->peer_type > b->peer_type) { return 1; }
+  return 0;
+}
+DEFINE_TREE (chat_peer, struct tdcli_peer *, tdcli_peer_cmp_chat_id, NULL);
+DEFINE_TREE (peer_chat, struct tdcli_peer *, tdcli_peer_cmp_peer_id, NULL);
+
+struct tree_chat_peer *tdcli_chats;
+struct tree_peer_chat *tdcli_peers;
+
+struct TdChat *get_chat (long long chat_id) { 
+  struct tdcli_peer PB;
+  PB.chat_id = chat_id;
+  struct tdcli_peer *P = tree_lookup_chat_peer (tdcli_chats, &PB);
+  return P ? P->chat : NULL;
+}
+
+struct TdUser *get_user (int user_id) { 
+  struct tdcli_peer PB;
+  PB.peer_type = CODE_User;
+  PB.peer_id = user_id;
+  struct tdcli_peer *P = tree_lookup_peer_chat (tdcli_peers, &PB);
+  return P ? P->user : NULL;
+}
+
+struct TdUserFull *get_user_full (int user_id) { 
+  struct tdcli_peer PB;
+  PB.peer_type = CODE_User;
+  PB.peer_id = user_id;
+  struct tdcli_peer *P = tree_lookup_peer_chat (tdcli_peers, &PB);
+  return P ? P->user_full : NULL;
+}
+
+int eq_str (char *a, char *b) {
+  return a ? b ? strcmp (a, b) : 0 : b ? 0 : 1;
+}
+
+int upd_str (char **a, char *b) {
+  if (*a) {
+    if (!b || strcmp (*a, b)) {
+      free (*a);
+      *a = b ? strdup (b) : NULL;
+      return 1;
+    } else {
+      return 0;
+    }
+  } else {
+    *a = b ? strdup (b) : NULL;
+    return b ? 1 : 0;
+  }
+}
+
+struct tdcli_peer *peer_update_chat (struct TdChat *C) {
+  struct tdcli_peer PB;
+  PB.chat_id = C->id_;
+  struct tdcli_peer *P = tree_lookup_chat_peer (tdcli_chats, &PB);
+  if (!P) {
+    switch (C->type_->ID) {
+    case CODE_PrivateChatInfo:
+      {
+        struct TdPrivateChatInfo *I = (void *)C->type_;
+        PB.peer_type = CODE_User;
+        PB.peer_id = I->user_->id_;
+      }
+      break;
+    case CODE_GroupChatInfo:
+      {
+        struct TdGroupChatInfo *I = (void *)C->type_;
+        PB.peer_type = CODE_Group;
+        PB.peer_id = I->group_->id_;
+      }
+      break;
+    case CODE_ChannelChatInfo:
+      {
+        struct TdChannelChatInfo *I = (void *)C->type_;
+        PB.peer_type = CODE_Channel;
+        PB.peer_id = I->channel_->id_;
+      }
+      break;
+    case CODE_SecretChatInfo:
+      {
+        struct TdSecretChatInfo *I = (void *)C->type_;
+        PB.peer_type = CODE_SecretChat;
+        PB.peer_id = I->secretChat_->id_;
+      }
+      break;
+    default:
+      assert (0);
+    }
+
+    P = tree_lookup_peer_chat (tdcli_peers, &PB);
+    if (P) {
+      assert (!P->chat_id);
+      P->chat_id = C->id_;      
+      tdcli_chats = tree_insert_chat_peer (tdcli_chats, P, rand ());
+    } else {
+      P = calloc (sizeof (*P), 1);
+      P->chat_id = PB.chat_id;
+      P->peer_type = PB.peer_type;
+      P->peer_id = PB.peer_id;
+      tdcli_chats = tree_insert_chat_peer (tdcli_chats, P, rand ());
+      tdcli_peers = tree_insert_peer_chat (tdcli_peers, P, rand ());
+    }
+  }
+
+  if (P->chat) {
+    TdDestroyObjectChat (P->chat);
+  }
+  P->chat = C;
+  __sync_fetch_and_add (&C->refcnt, 1);
+
+  switch (C->type_->ID) {
+    case CODE_PrivateChatInfo:
+      {        
+        struct TdPrivateChatInfo *I = (void *)C->type_;
+        if (P->user) {
+          TdDestroyObjectUser (P->user);
+        }
+        P->user = I->user_;
+        __sync_fetch_and_add (&P->user->refcnt, 1);
+      }
+      break;
+    case CODE_GroupChatInfo:
+      {
+        struct TdGroupChatInfo *I = (void *)C->type_;
+        if (P->group) {
+          TdDestroyObjectGroup (P->group);
+        }
+        P->group = I->group_;
+        __sync_fetch_and_add (&P->group->refcnt, 1);
+      }
+      break;
+    case CODE_ChannelChatInfo:
+      {
+        struct TdChannelChatInfo *I = (void *)C->type_;
+        if (P->channel) {
+          TdDestroyObjectChannel (P->channel);
+        }
+        P->channel = I->channel_;
+        __sync_fetch_and_add (&P->channel->refcnt, 1);
+      }
+      break;
+    case CODE_SecretChatInfo:
+      {
+        struct TdSecretChatInfo *I = (void *)C->type_;
+        if (P->secret_chat) {
+          TdDestroyObjectSecretChat (P->secret_chat);
+        }
+        P->secret_chat = I->secretChat_;
+        __sync_fetch_and_add (&P->secret_chat->refcnt, 1);
+      }
+      break;
+    default:
+      assert (0);
+  }
+
+  return P;
+}
+
+struct tdcli_peer *peer_update_peer (struct TdNullaryObject *U, int id) {
+  struct tdcli_peer PB;
+  PB.peer_type = U->ID;
+  PB.peer_id = id;
+
+  struct tdcli_peer *P = tree_lookup_peer_chat (tdcli_peers, &PB);
+  if (!P) {
+    P = calloc (sizeof (*P), 1);
+    P->peer_type = PB.peer_type;
+    P->peer_id = PB.peer_id;
+    tdcli_peers = tree_insert_peer_chat (tdcli_peers, P, rand ());
+  }
+
+  if (P->user) {
+    TdDestroyObjectNullaryObject ((void *)P->user);
+  }
+  P->user = (void *)U;
+  __sync_fetch_and_add (&U->refcnt, 1);
+  return P;
+}
+
 #define chat_alias_cmp(a,b) strcmp (a->name, b->name)
 DEFINE_TREE (chat_alias, struct chat_alias *, chat_alias_cmp, NULL)
 
+struct tree_chat_alias *alias_tree;
+struct chat_alias alias_queue;
+
+void add_alias (const char *name, struct tdcli_peer *peer) {
+  if (alias_queue.next == NULL) {
+    alias_queue.next = alias_queue.prev = &alias_queue;
+  }
+  struct chat_alias *alias = malloc (sizeof (*alias));
+  alias->name = strdup (name);
+  alias->peer = peer;
+  alias_tree = tree_insert_chat_alias (alias_tree, alias, rand ());
+  alias->next = &alias_queue;
+  alias->prev = alias_queue.prev;
+  alias->next->prev = alias->prev->next = alias;
+}
+
+void del_alias (const char *name) {
+  struct chat_alias tmp;
+  tmp.name = (void *)name;
+
+  struct chat_alias *alias = tree_lookup_chat_alias (alias_tree, &tmp);
+  if (alias) {
+    alias_tree = tree_delete_chat_alias (alias_tree, alias);
+    alias->prev->next = alias->next;
+    alias->next->prev = alias->prev;
+    free (alias->name);
+    free (alias);
+  }
+}
+
+struct chat_alias *get_by_alias (const char *name) {
+  struct chat_alias tmp;
+  tmp.name = (void *)name;
+
+  return tree_lookup_chat_alias (alias_tree, &tmp);
+}
+
+void add_alias_internal (struct tdcli_peer *e, char *alias) {
+  if (!alias) { return; }
+  e->aliases_cnt ++;
+  e->aliases = realloc (e->aliases, sizeof (void *) * (e->aliases_cnt));
+  e->aliases[e->aliases_cnt - 1] = strdup (alias);
+
+  add_alias (alias, e);
+}
+
+void del_alias_internal (struct tdcli_peer *e, char *alias) {
+  if (!alias) { return; }
+  int i;
+  for (i = 0; i < e->aliases_cnt; i++) {
+    if (!strcmp (e->aliases[i], alias)) {
+      del_alias (alias);
+      e->aliases[i] = e->aliases[e->aliases_cnt - 1];
+      free (e->aliases[i]);
+      e->aliases = realloc (e->aliases, sizeof (void *) * (e->aliases_cnt - 1));
+      e->aliases_cnt --;
+      return;
+    }
+  }
+}
+
+void sub_alias_internal (struct tdcli_peer *e, char *alias, char *new_alias) {
+  if (!alias && !new_alias) { return; }
+  if (!alias) { return add_alias_internal (e, new_alias); }
+  if (!new_alias) { return del_alias_internal (e, alias); }
+  if (!strcmp (alias, new_alias)) { return; }
+
+  int i;
+  for (i = 0; i < e->aliases_cnt; i++) {
+    if (!strcmp (e->aliases[i], alias)) {
+      del_alias (alias);
+      free (e->aliases[i]);
+      e->aliases[i] = strdup (new_alias);
+      add_alias (new_alias, e);
+      return;
+    }
+  }
+}
+
+int utf8_char_len (unsigned char c) {
+  if ((c & 0x80) == 0) { return 1; }
+  if ((c & 0xc0) == 0x80) { return 2; }
+  if ((c & 0xe0) == 0xc0) { return 3; }
+  if ((c & 0xf0) == 0xe0) { return 4; }
+  if ((c & 0xf8) == 0xf0) { return 5; }
+  if ((c & 0xfc) == 0xf8) { return 6; }
+  if ((c & 0xfe) == 0xfc) { return 7; }
+  return 8;
+}
+
+char *generate_alias_title (struct tdcli_peer *e, const char *title) {
+  if (!title) { return NULL; }
+  static char s[256];
+  ssize_t l = strlen (title);
+  if (l >= 250) { l = 250; }
+  memcpy (s, title, l);
+  s[l] = 0;
+
+  int p = 0;
+  while (p < l) {
+    if ((s[p] <= 32 && s[p] >= 0) || (p == 0 && s[p] == '@') || s[p] == '#') {
+      s[p] = '_';
+    }
+    p ++;
+  }
+
+  p = 0;
+  while (1) {
+    struct chat_alias *A = get_by_alias (s);
+    if (!A) { break; }
+    if (A->peer == e) {
+      break;
+    }
+    sprintf (s + l, "#%d", ++p);
+  }
+  return s;
+}
+
+char *generate_alias_name (struct tdcli_peer *e, char *first_name, char *last_name) {
+  if (!first_name && !last_name) { return NULL; }
+  if (!first_name) { return generate_alias_title (e, last_name); }
+  if (!last_name) { return generate_alias_title (e, first_name); }
+  static char s[256];
+  snprintf (s, 250, "%s %s", first_name, last_name);
+  return generate_alias_title (e, s);
+}
+
+char *generate_alias_username (char *username) {
+  if (!username) { return NULL; }
+  static char s[256];
+  s[0] = '@';
+  strncpy (s + 1, username, 250);
+  char *t = s + 1;
+  while (*t) {
+    if (*t >= 'A' && *t <= 'Z') {
+      *t = (char)(*t + 'a' - 'A');
+    }
+    t ++;
+  }
+  return s;
+}
+
+void on_user_update (struct TdUser *U) {
+  struct tdcli_peer *P = peer_update_peer ((void *)U, U->id_);
+    
+  if (!P->main_alias) {
+    char s[20];
+    sprintf (s, "user#id%d", U->id_);
+    P->main_alias = strdup (s);
+    add_alias_internal (P, s);
+  }
+  
+  char *u;
+  
+  u = generate_alias_username (U->username_);
+  sub_alias_internal (P, P->username_alias, u);
+  upd_str (&P->username_alias, u);
+    
+  if (!P->chat) {
+    u = generate_alias_name (P, U->first_name_, U->last_name_);
+    sub_alias_internal (P, P->name_alias, u);
+    upd_str (&P->name_alias, u);
+  }
+}
+
+void on_group_update (struct TdGroup *G) {
+  struct tdcli_peer *P = peer_update_peer ((void *)G, G->id_);
+    
+  if (!P->main_alias) {
+    char s[20];
+    sprintf (s, "group#id%d", G->id_);
+    P->main_alias = strdup (s);
+    add_alias_internal (P, s);
+  }
+}
+
+void on_channel_update (struct TdChannel *Ch) {
+  struct tdcli_peer *P = peer_update_peer ((void *)Ch, Ch->id_);
+    
+  if (!P->main_alias) {
+    char s[20];
+    sprintf (s, "channel#id%d", Ch->id_);
+    P->main_alias = strdup (s);
+    add_alias_internal (P, s);
+  }
+  
+  char *u;  
+  u = generate_alias_username (Ch->username_);
+  sub_alias_internal (P, P->username_alias, u);
+  upd_str (&P->username_alias, u);
+}
+
+void on_secret_chat_update (struct TdSecretChat *S) {
+  struct tdcli_peer *P = peer_update_peer ((void *)S, S->id_);
+    
+  if (!P->main_alias) {
+    char s[20];
+    sprintf (s, "secret_chat#id%d", S->id_);
+    P->main_alias = strdup (s);
+    add_alias_internal (P, s);
+  }
+}
+
+void on_chat_update (struct TdChat *C) {
+  switch (C->type_->ID) {
+  case CODE_PrivateChatInfo:
+    {
+      struct TdPrivateChatInfo *I = (void *)C->type_;
+      on_user_update (I->user_);
+    }
+    break;
+  case CODE_GroupChatInfo:
+    {
+      struct TdGroupChatInfo *I = (void *)C->type_;
+      on_group_update (I->group_);
+    }
+    break;
+  case CODE_ChannelChatInfo:
+    {
+      struct TdChannelChatInfo *I = (void *)C->type_;
+      on_channel_update (I->channel_);
+    }
+    break;
+  case CODE_SecretChatInfo:
+    {
+      struct TdSecretChatInfo *I = (void *)C->type_;
+      on_secret_chat_update (I->secretChat_);
+    }
+    break;
+    
+  }
+
+  struct tdcli_peer *P = peer_update_chat (C);
+  assert (P);
+  
+  char *u;
+  u = generate_alias_title (P, C->title_);
+  sub_alias_internal (P, P->name_alias, u);
+  upd_str (&P->name_alias, u);
+
+  total_unread += C->unread_count_ - P->unread_count;
+  P->unread_count = C->unread_count_;
+}
+
+
+/* {{{ MESSAGE ALIASES */
 struct message_alias {
   int local_id;
   int message_id;
@@ -114,22 +577,6 @@ DEFINE_TREE (message_alias_global, struct message_alias *, message_alias_cmp_glo
 struct tree_message_alias_local *message_local_tree;
 struct tree_message_alias_global *message_global_tree;
 int message_local_last_id;
-
-struct file_wait_cb {
-  struct file_wait_cb *next;
-  void (*callback)(struct tdlib_state *, void *, int, const char *);
-  void *callback_extra;
-};
-
-struct file_wait {
-  int id;
-  struct file_wait_cb *first_cb;
-  struct file_wait_cb *last_cb;
-};
-
-#define file_wait_cmp(a,b) (a->id - b->id)
-DEFINE_TREE (file_wait, struct file_wait *, file_wait_cmp, NULL)
-struct tree_file_wait *file_wait_tree;
 
 struct message_alias *convert_local_to_global (int local_id) {
   struct message_alias M;
@@ -153,9 +600,23 @@ struct message_alias *convert_global_to_local (long long chat_id, int message_id
 
   return A;
 }
+/* }}} */ 
 
-struct tree_chat_alias *alias_tree;
-struct chat_alias alias_queue;
+struct file_wait_cb {
+  struct file_wait_cb *next;
+  void (*callback)(void *, void *, struct TdNullaryObject *);
+  void *callback_extra;
+};
+
+struct file_wait {
+  int id;
+  struct file_wait_cb *first_cb;
+  struct file_wait_cb *last_cb;
+};
+
+#define file_wait_cmp(a,b) (a->id - b->id)
+DEFINE_TREE (file_wait, struct file_wait *, file_wait_cmp, NULL)
+struct tree_file_wait *file_wait_tree;
 
 void in_command_decref (struct in_command *cmd) {
   if (!--cmd->refcnt) {
@@ -193,7 +654,7 @@ int log_level;
 
 char *line_ptr;
 
-struct tdl_chat_info *cur_chat_mode_chat;
+long long cur_chat_mode_chat_id;
 extern int readline_disabled;
 
 extern int disable_output;
@@ -206,47 +667,14 @@ extern int use_ids;
 
 extern int daemonize;
 
-extern struct tdlib_state *TLS;
+extern void *TLS;
 int readline_deactivated;
 
-void add_alias (const char *name, int type, void *chat) {
-  if (alias_queue.next == NULL) {
-    alias_queue.next = alias_queue.prev = &alias_queue;
-  }
-  struct chat_alias *alias = malloc (sizeof (*alias));
-  alias->name = strdup (name);
-  alias->type = type;
-  alias->chat = chat;
-  alias_tree = tree_insert_chat_alias (alias_tree, alias, rand ());
-  alias->next = &alias_queue;
-  alias->prev = alias_queue.prev;
-  alias->next->prev = alias->prev->next = alias;
+void update_chat_aliases (struct TdChat *chat) {
+  if (!chat) { return; }
 }
 
-void del_alias (const char *name) {
-  struct chat_alias tmp;
-  tmp.name = (void *)name;
-
-  struct chat_alias *alias = tree_lookup_chat_alias (alias_tree, &tmp);
-  if (alias) {
-    alias_tree = tree_delete_chat_alias (alias_tree, alias);
-    alias->prev->next = alias->next;
-    alias->next->prev = alias->prev;
-    free (alias->name);
-    free (alias);
-  }
-}
-
-struct chat_alias *get_by_alias (const char *name) {
-  struct chat_alias tmp;
-  tmp.name = (void *)name;
-
-  return tree_lookup_chat_alias (alias_tree, &tmp);
-}
-
-void on_chat_update (struct tdlib_state *TLSR, struct tdl_chat_info *C);
-
-void fail_interface (struct tdlib_state *TLS, struct in_command *cmd, int error_code, const char *format, ...) __attribute__ (( format (printf, 4, 5)));
+void fail_interface (void *TLS, struct in_command *cmd, int error_code, const char *format, ...) __attribute__ (( format (printf, 4, 5)));
 void event_incoming (struct bufferevent *bev, short what, void *_arg);
 
 int is_same_word (const char *s, size_t l, const char *word) {
@@ -442,6 +870,7 @@ void next_token_end_ac (void) {
 }
 
 #define NOT_FOUND (int)0x80000000
+#define WAIT_AIO (int)0x80000001
 tgl_peer_id_t TGL_PEER_NOT_FOUND = {.peer_id = NOT_FOUND};
 
 long long cur_token_int (char *s) {
@@ -488,7 +917,7 @@ char *print_permanent_peer_id (tgl_peer_id_t id) {
   return buf;
 }
 
-struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd);
+long long cur_token_peer (char *s, enum tdcli_chat_type mode, struct in_command *cmd);
 
 tdl_message_id_t cur_token_msg_id (char *s, struct in_command *cmd) {
   static tdl_message_id_t res;
@@ -531,17 +960,17 @@ tdl_message_id_t cur_token_msg_id (char *s, struct in_command *cmd) {
   char c = *t;
   *t = 0;
 
-  struct tdl_chat_info *C = cur_token_peer (s, -1, cmd);
+  long long chat_id = cur_token_peer (s, tdcli_any, cmd);
   *t = c;
 
-  if (C == (void *)-1l) {
+  if (chat_id == WAIT_AIO) {
     res.message_id = -2;
     return res;
   }
-  if (!C) {
+  if (chat_id == NOT_FOUND) {
     return res;
   }
-  res.chat_id = C->id;
+  res.chat_id = chat_id;
   res.message_id = x;
   return res;
 }
@@ -560,6 +989,7 @@ double cur_token_double (char *s) {
   }
 }
 
+
 void proceed_with_query (struct delayed_query *q) {
   interpreter_ex (q->cmd);
   in_command_decref (q->cmd);
@@ -570,8 +1000,8 @@ void proceed_with_query (struct delayed_query *q) {
   free (q);
 }
 
-void stop_query (struct delayed_query *q) {
-  fail_interface (TLS, q->cmd, TLS->error_code, "Fail to resolve chat: %s", TLS->error);
+void stop_query (struct delayed_query *q, int error_code, char *error) {
+  fail_interface (TLS, q->cmd, error_code, "Fail to resolve chat: %s", error);
   in_command_decref (q->cmd);
   
   if (q->token) {
@@ -580,24 +1010,19 @@ void stop_query (struct delayed_query *q) {
   free (q);
 }
 
-void process_with_query (struct delayed_query *q, int success) {
-  if (!success) {
-    stop_query (q);
-  } else {
-    proceed_with_query (q);
+void process_with_query_resolve_chat (void *TLS, void *extra, struct TdNullaryObject *R) {
+  if (R->ID == CODE_Error) {
+    struct TdError *E = (void *)R;
+    stop_query (extra, E->code_, E->message_);
+    return;
   }
+  update_chat_aliases ((struct TdChat *)R);
+  proceed_with_query (extra);
 }
 
-void process_with_query_resolve_chat (struct tdlib_state *TLSR, void *extra, int success, struct tdl_chat_info *C) {
-  if (success && C) {
-    on_chat_update (TLS, C);
-  }
-  process_with_query (extra, success);
-}
-
-struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd) {
+long long cur_token_peer (char *s, enum tdcli_chat_type mode, struct in_command *cmd) {
   if (!s) {
-    return NULL;
+    return NOT_FOUND;
   }
 
   if (*s == '@') {
@@ -611,47 +1036,47 @@ struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd)
 
   struct chat_alias *A = get_by_alias (s);
   if (A) {
-    if (A->type == -1) {
-      struct tdl_chat_info *C = A->chat;
-      if (mode >= 0 && C->chat->type != mode) {
-        return NULL;
+    if (A->peer->chat) {
+      if (mode == tdcli_any || mode == A->peer->peer_type) {
+        return A->peer->chat_id;
       } else {
-        return A->chat;
+        return NOT_FOUND;
       }
     } else if (!cmd) {
-      return NULL;
+      return NOT_FOUND;
     } else {
-      if (mode >= 0 && A->type != mode) {
-        return NULL;
+      if (mode != tdcli_any && A->peer->peer_type != mode) {
+        return NOT_FOUND;       
       }
       struct delayed_query *q = calloc (sizeof (*q), 1);
       cmd->refcnt ++;
       q->cmd = cmd;
       q->action = 1;
       q->mode = mode;
-      switch (A->type) {
-      case tdl_chat_type_user:
-        tdlib_create_private_chat (TLS, process_with_query_resolve_chat, q, ((struct tdl_user *)A->chat)->id);
+
+      switch (A->peer->peer_type) {
+      case CODE_User:
+        TdCClientSendCommand (TLS, (void *)TdCreateObjectCreatePrivateChat (A->peer->peer_id), process_with_query_resolve_chat, q);
         break;
-      case tdl_chat_type_group:
-        tdlib_create_group_chat (TLS, process_with_query_resolve_chat, q, ((struct tdl_group *)A->chat)->id);
+      case CODE_Group:
+        TdCClientSendCommand (TLS, (void *)TdCreateObjectCreateGroupChat (A->peer->peer_id), process_with_query_resolve_chat, q);
         break;
-      case tdl_chat_type_channel:
-        tdlib_create_channel_chat (TLS, process_with_query_resolve_chat, q, ((struct tdl_channel *)A->chat)->id);
+      case CODE_Channel:
+        TdCClientSendCommand (TLS, (void *)TdCreateObjectCreateChannelChat (A->peer->peer_id), process_with_query_resolve_chat, q);
         break;
-      /*case tdl_chat_type_secret_chat:
+      /*case CODE_secret_chat:
         tdlib_get_secret_chat (TLS, process_with_query_resolve_chat, q, ((struct tdl_secret_chat *)q->chat)->id;
         break;*/
       default:
         assert (0);
-        return NULL;
+        return NOT_FOUND;
       }
-      return (void *)-1l;
+      return WAIT_AIO;
     }
   }
 
   if (!cmd) {
-    return NULL;
+    return NOT_FOUND;
   }
   
   if (*s == '@' && cur_token_len >= 2) {
@@ -660,13 +1085,14 @@ struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd)
     q->cmd = cmd;
     q->action = 2;
     q->mode = mode;
-      
-    tdlib_search_public_chat (TLS, process_with_query_resolve_chat, q, q->token);
-    return (void *)-1l;
+
+    TdCClientSendCommand (TLS, (void *)TdCreateObjectSearchPublicChat (s + 1), process_with_query_resolve_chat, q);
+
+    return WAIT_AIO;
   }
 
   char *f[3] = { "user#id", "group#id", "channel#id" };
-  enum tdl_chat_type ff[3] = {tdl_chat_type_user, tdl_chat_type_group, tdl_chat_type_channel};
+  int ff[3] = {CODE_User, CODE_Group, CODE_Channel};
 
   int i;
   for (i = 0; i < 3; i++) {
@@ -680,50 +1106,37 @@ struct tdl_chat_info *cur_token_peer (char *s, int mode, struct in_command *cmd)
         q->cmd = cmd;
 
         switch (ff[i]) {
-        case tdl_chat_type_user:
-          tdlib_create_private_chat (TLS, process_with_query_resolve_chat, q, id);
-          break;
-        case tdl_chat_type_group:
-          tdlib_create_group_chat (TLS, process_with_query_resolve_chat, q, id);
-          break;
-        case tdl_chat_type_channel:
-          tdlib_create_channel_chat (TLS, process_with_query_resolve_chat, q, id);
-          break;
-        default:
-          in_command_decref (cmd);
-          free (q);
-          break;
+          case CODE_User:
+            TdCClientSendCommand (TLS, (void *)TdCreateObjectCreatePrivateChat (id), process_with_query_resolve_chat, q);
+            break;
+          case CODE_Group:
+            TdCClientSendCommand (TLS, (void *)TdCreateObjectCreateGroupChat (id), process_with_query_resolve_chat, q);
+            break;
+          case CODE_Channel:
+            TdCClientSendCommand (TLS, (void *)TdCreateObjectCreateChannelChat (id), process_with_query_resolve_chat, q);
+            break;
+            /*case CODE_secret_chat:
+              tdlib_get_secret_chat (TLS, process_with_query_resolve_chat, q, ((struct tdl_secret_chat *)q->chat)->id;
+              break;*/
+          default:
+            assert (0);
+            return NOT_FOUND;
         }
-        return (void *)-1l;
+        
+        return WAIT_AIO;
       }
     }
   }
   
-  return NULL;
+  return NOT_FOUND;
 }
 
 char *get_default_prompt (void) {
   static char buf[1000];
   int l = 0;
-  switch (conn_state) {
-  case tdl_connection_unknown:
-    l += sprintf (buf + l, "[?] ");
-    break;
-  case tdl_connection_wait_net:
-    l += sprintf (buf + l, "[W] ");
-    break;
-  case tdl_connection_connecting:
-    l += sprintf (buf + l, "[C] ");
-    break;
-  case tdl_connection_updating:
-    l += sprintf (buf + l, "[U] ");
-    break;
-  case tdl_connection_ready:
-    l += sprintf (buf + l, "[R] ");
-    break;
-  }
+  l += snprintf (buf + l, 999 - l, "[%s] ", conn_state);
   l += snprintf (buf + l, 999 - l, "%d ", total_unread);
-  if (TLS->cur_uploading_bytes || TLS->cur_downloading_bytes) {
+  /*if (TLS->cur_uploading_bytes || TLS->cur_downloading_bytes) {
     l += snprintf (buf + l, 999 - l, COLOR_RED "[");
     int ok = 0;
     if (TLS->cur_uploading_bytes) {
@@ -739,10 +1152,10 @@ char *get_default_prompt (void) {
     l += snprintf (buf + l, 999 - l, "]" COLOR_NORMAL);
     l += snprintf (buf + l, 999 - l, "%s", default_prompt);
     return buf;
-  } 
-  if (cur_chat_mode_chat) {
-    l += snprintf (buf + l, 999 - l, "%.*s ", 100, cur_chat_mode_chat->title);
-  }
+  }*/
+  //if (cur_chat_mode_chat) {
+  //  l += snprintf (buf + l, 999 - l, "%.*s ", 100, cur_chat_mode_chat->title);
+  //}
   if (l > 0 && buf[l - 1] == ' ') {
     l--;
   }
@@ -791,29 +1204,30 @@ char *in_chat_commands[] = {
   0
 };
 
-void print_string_gw (struct in_command *cmd, int success, struct res_arg *args);
-void open_filename_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_filename_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_user_list_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_chat_members_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_msg_list_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_dialog_list_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_group_info_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_channel_info_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_user_info_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_peer_info_gw (struct in_command *cmd, int success, struct res_arg *args);
+void print_string_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_chat_link_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void open_filename_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_filename_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_user_list_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_chat_members_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_msg_list_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_dialog_list_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_group_info_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_channel_info_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_user_info_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_peer_info_gw (struct in_command *cmd, struct TdNullaryObject *res);
 
-void print_channel_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_user_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_chat_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_peer_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_secret_chat_gw (struct in_command *cmd, int success, struct res_arg *args);
+void print_channel_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_user_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_chat_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_peer_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_secret_chat_gw (struct in_command *cmd, struct TdNullaryObject *res);
 
-void print_msg_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_msg_success_gw (struct in_command *cmd, int success, struct res_arg *args);
-void print_success_gw (struct in_command *cmd, int success, struct res_arg *args);
+void print_msg_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_msg_success_gw (struct in_command *cmd, struct TdNullaryObject *res);
+void print_success_gw (struct in_command *cmd, struct TdNullaryObject *result);
 
-void print_invite_link_gw (struct in_command *cmd, int success, struct res_arg *args);
+void print_invite_link_gw (struct in_command *cmd, struct TdNullaryObject *res);
 
 struct command commands[];
 
@@ -859,96 +1273,12 @@ void free_res_arg_list (struct res_arg *A, int size) {
   }
 }
 
-void tdcli_empty_cb (struct tdlib_state *TLS, void *extra, int success) {
+void tdcli_cb (void *instance, void *extra, struct TdNullaryObject *result) {
   if (!extra) { return; }
+
   struct in_command *cmd = extra;
-
-  struct res_arg args[11];
-  memset (args, 0, sizeof (args));
-
-  cmd->cb (cmd, success, args);
-  
-  free_res_arg_list (args, 11);
-    
-  in_command_decref (cmd);
-}
-
-void tdcli_string_cb (struct tdlib_state *TLS, void *extra, int success, const char *str) {
-  if (!extra) { return; }
-  struct in_command *cmd = extra;
-
-  struct res_arg args[11];
-  memset (args, 0, sizeof (args));
-
-  if (str) {
-    args[0].flags = 1;
-    args[0].str = strdup (str);
-  }
-
-  cmd->cb (cmd, success, args);
-  
-  free_res_arg_list (args, 11);
-    
-  in_command_decref (cmd);
-}
-
-void tdcli_ptr_cb (struct tdlib_state *TLS, void *extra, int success, void *M) { 
-  if (!extra) { return; }
-  struct in_command *cmd = extra; 
-  struct res_arg args[11];
-  memset (args, 0, sizeof (args));
-  args[0].ptr = M; 
-  cmd->cb (cmd, success, args); 
-  free_res_arg_list (args, 11); 
-    
-  in_command_decref (cmd);
-}
-
-void tdcli_int_cb (struct tdlib_state *TLS, void *extra, int success, int M) { 
-  if (!extra) { return; }
-  struct in_command *cmd = extra; 
-  struct res_arg args[11];
-  memset (args, 0, sizeof (args));
-  args[0].num = M; 
-  cmd->cb (cmd, success, args); 
-  free_res_arg_list (args, 11); 
-    
-  in_command_decref (cmd);
-}
-
-void tdcli_vec_ptr_cb (struct tdlib_state *TLS, void *extra, int success, int size, void **M) { 
-  if (!extra) { return; }
-  struct in_command *cmd = extra; 
-  struct res_arg args[11];
-  memset (args, 0, sizeof (args));
-  args[0].flags = 2;
-  args[0].vec_len = size;
-  args[0].vec = calloc (sizeof (struct res_arg), size);
-  int i;
-  for (i = 0; i < size; i++) {
-    args[0].vec[i].ptr = M[i];
-  }
-  cmd->cb (cmd, success, args); 
-  free_res_arg_list (args, 11); 
-    
-  in_command_decref (cmd);
-}
-
-void tdcli_vec_ptr_total_cb (struct tdlib_state *TLS, void *extra, int success, int total, int size, void **M) { 
-  if (!extra) { return; }
-  struct in_command *cmd = extra; 
-  struct res_arg args[11];
-  memset (args, 0, sizeof (args));
-  args[0].num = total;
-  args[1].flags = 2;
-  args[1].vec_len = size;
-  args[1].vec = calloc (sizeof (struct res_arg), size);
-  int i;
-  for (i = 0; i < size; i++) {
-    args[1].vec[i].ptr = M[i];
-  }
-  cmd->cb (cmd, success, args); 
-  free_res_arg_list (args, 11); 
+  assert (cmd->cb);
+  cmd->cb (cmd, result);
     
   in_command_decref (cmd);
 }
@@ -956,12 +1286,12 @@ void tdcli_vec_ptr_total_cb (struct tdlib_state *TLS, void *extra, int success, 
 /* {{{ client methods */
 
 void on_timer_alarm (evutil_socket_t fd, short what, void *arg) {
-  tdcli_empty_cb (TLS, arg, 1);
+  struct TdOk *result = TdCreateObjectOk ();  
+  tdcli_cb (TLS, arg, (struct TdNullaryObject *)result);
+  TdDestroyObjectOk (result);
 }
 
 void do_timer (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
   struct event *ev = evtimer_new (ev_base, on_timer_alarm, cmd);
 
   double x = args[2].dval;
@@ -977,9 +1307,7 @@ void do_help (struct command *command, int arg_num, struct arg args[], struct in
   char s[BL];
   int p = 0;
   s[p] = 0;
-  mprint_start (cmd->ev);
   int total = 0;
-  mpush_color (cmd->ev, COLOR_YELLOW);
   struct command *cmd_it = commands;
 
   const char *command_name = args[2].str;
@@ -1036,17 +1364,19 @@ void do_help (struct command *command, int arg_num, struct arg args[], struct in
     if (p > BL) { p = BL; }
   }
 
-  cmd->refcnt ++;
-  tdcli_string_cb (TLS, cmd, 1, s);
+  struct TdTestString *result = TdCreateObjectTestString (s);
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);
+  TdDestroyObjectTestString (result);
   #undef BL
 }
 
 void do_show_license (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  static char *b = 
+  static char *s = 
 #include "LICENSE.h"
   ;
-  cmd->refcnt ++;
-  tdcli_string_cb (TLS, cmd, 1, b);
+  struct TdTestString *result = TdCreateObjectTestString (s);
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);
+  TdDestroyObjectTestString (result);
 }
 
 void do_quit (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1055,8 +1385,9 @@ void do_quit (struct command *command, int arg_num, struct arg args[], struct in
   }
   do_halt (0);
   
-  cmd->refcnt ++;
-  tdcli_empty_cb (TLS, cmd, 1);
+  struct TdOk *result = TdCreateObjectOk ();  
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);
+  TdDestroyObjectOk (result);
 }
 
 void do_safe_quit (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1065,16 +1396,18 @@ void do_safe_quit (struct command *command, int arg_num, struct arg args[], stru
   }
   safe_quit = 1;
   
-  cmd->refcnt ++;
-  tdcli_empty_cb (TLS, cmd, 1);
+  struct TdOk *result = TdCreateObjectOk ();  
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);
+  TdDestroyObjectOk (result);
 }
 
 void do_set (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   const char *var = args[2].str;
   int value = (int)args[2].num;
 
-  if (!strcmp (var, "debug_verbosity")) {
-    tdlib_set_logger_verbosity (value);
+  if (!strcmp (var, "debug_verbosity")) {  
+    verbosity = value;
+    TdCClientSetVerbosity (verbosity);
   } else if (!strcmp (var, "log_level")) {
     log_level = value;
   } else if (!strcmp (var, "msg_num")) {
@@ -1083,17 +1416,19 @@ void do_set (struct command *command, int arg_num, struct arg args[], struct in_
     alert_sound = value;
   }
   
-  cmd->refcnt ++;
-  tdcli_empty_cb (TLS, cmd, 1);
+  struct TdOk *result = TdCreateObjectOk ();  
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);  
+  TdDestroyObjectOk (result);
 }
 
 void do_chat_with_peer (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   if (!cmd->ev) {
-    cur_chat_mode_chat = args[2].chat;
+    cur_chat_mode_chat_id = args[2].chat_id;
   }
   
-  cmd->refcnt ++;
-  tdcli_empty_cb (TLS, cmd, 1);
+  struct TdOk *result = TdCreateObjectOk ();  
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);  
+  TdDestroyObjectOk (result);
 }
 
 void do_main_session (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1103,15 +1438,18 @@ void do_main_session (struct command *command, int arg_num, struct arg args[], s
   notify_ev = cmd->ev;
   if (cmd->ev) { cmd->ev->refcnt ++; }
   
-  cmd->refcnt ++;
-  tdcli_empty_cb (TLS, cmd, 1);
+  struct TdOk *result = TdCreateObjectOk ();  
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);  
+  TdDestroyObjectOk (result);
 }
 
 void do_version (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  static char *s = "Telegram-cli version " TELEGRAM_CLI_VERSION " (uses tdlib)";
+  static char *s = TELEGRAM_CLI_VERSION_STR;
   
-  cmd->refcnt ++;
-  tdcli_string_cb (TLS, cmd, 1, s);
+  
+  struct TdTestString *result = TdCreateObjectTestString (s);
+  tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);
+  TdDestroyObjectTestString (result);
 }
 /* }}} */
 
@@ -1123,12 +1461,12 @@ void do_set_password (struct command *command, int arg_num, struct arg args[], s
 }
 /* }}} */
 
-void try_download_cb (struct tdlib_state *TLS, void *extra, int success) {
-  if (!success) {
+void try_download_cb (void *instance, void *extra, struct TdNullaryObject *result) {
+  if (result->ID == CODE_Error) {
     struct file_wait *F = extra;
     struct file_wait_cb *cb = F->first_cb;
     while (cb) {
-      cb->callback (TLS, cb->callback_extra, 0, NULL);
+      cb->callback (TLS, cb->callback_extra, result);
       struct file_wait_cb *n = cb->next;
       free (cb);
       cb = n;
@@ -1148,30 +1486,28 @@ void do_load_file (struct command *command, int arg_num, struct arg args[], stru
     file_wait_tree = tree_insert_file_wait (file_wait_tree, F, rand ());
   }
   struct file_wait_cb *cb = calloc (sizeof (*cb), 1);
-  cb->callback = tdcli_string_cb;
-  cmd->refcnt ++;
+  cb->callback = tdcli_cb;  
   cb->callback_extra = cmd;
   if (F->first_cb) {
     F->last_cb->next = cb;
     F->last_cb = cb;
   } else {
     F->last_cb = F->first_cb = cb;
-    tdlib_download_file (TLS, try_download_cb, F, id);
+
+    TdCClientSendCommand(TLS, (void *)TdCreateObjectDownloadFile (id), try_download_cb, F);
   }
 }
 
 /* {{{ SENDING MESSAGES */
 
 void do_msg (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   long long chat_id;
   int reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;
     reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[2].chat->id;
+    chat_id = args[2].chat_id;
     reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
@@ -1189,8 +1525,10 @@ void do_msg (struct command *command, int arg_num, struct arg args[], struct in_
     }
   }
 
-  union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, text, do_html, disable_preview, 1);
-  tdlib_send_message (TLS, (void *)tdcli_ptr_cb, cmd, chat_id, reply_id, 0, 0, NULL, content);
+  assert (do_html == 0 || do_html == 1);
+
+  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageText (text, disable_preview, 1, (void *)TdCreateObjectVectorNullaryObject (0, NULL));
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
 }
 
 void do_compose (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1233,81 +1571,74 @@ void do_compose (struct command *command, int arg_num, struct arg args[], struct
 }
 
 void do_send_file (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   long long chat_id;
   int reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;    
     reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[2].chat->id;
+    chat_id = args[2].chat_id;
     reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
   char *media_type = args[3].str;
-  enum tdl_media_type type;
+  char *file_name = args[4].str;
+  char *caption = args[5].str;
+
+  
+  struct TdInputMessageContent *content = NULL;
   if (media_type && strlen (media_type)) {
     if (!strcmp (media_type, "animation")) {
-      type = tdl_media_animation;
+      content = (void *)TdCreateObjectInputMessageAnimation ((void *)TdCreateObjectInputFileLocal (file_name), 0, 0, caption);
     } else if (!strcmp (media_type, "audio")) {
-      type = tdl_media_audio;
+      content = (void *)TdCreateObjectInputMessageAudio ((void *)TdCreateObjectInputFileLocal (file_name), 0, NULL, NULL, caption);
     } else if (!strcmp (media_type, "document")) {
-      type = tdl_media_document;
+      content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), caption);
     } else if (!strcmp (media_type, "photo")) {
-      type = tdl_media_photo;
+      content = (void *)TdCreateObjectInputMessagePhoto ((void *)TdCreateObjectInputFileLocal (file_name), caption);
     } else if (!strcmp (media_type, "sticker")) {
-      type = tdl_media_sticker;
+      content = (void *)TdCreateObjectInputMessageSticker ((void *)TdCreateObjectInputFileLocal (file_name));
     } else if (!strcmp (media_type, "video")) {
-      type = tdl_media_video;
+      content = (void *)TdCreateObjectInputMessageVideo ((void *)TdCreateObjectInputFileLocal (file_name), 0, 0, 0, caption);
     } else if (!strcmp (media_type, "voice")) {
-      type = tdl_media_voice;
+      content = (void *)TdCreateObjectInputMessageVoice ((void *)TdCreateObjectInputFileLocal (file_name), 0, NULL, caption);
     } else {
       fail_interface (TLS, cmd, EINVAL, "Unknown media type");
       return;
     }
   } else {
-    type = tdl_media_document;
+    content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), caption);
   }
-  
-  char *file_name = args[4].str;
-  char *caption = args[5].str;
 
-  union tdl_input_file *f = tdlib_create_input_file_local (TLS, file_name);
-  union tdl_input_message_content *content = tdlib_create_input_message_content_media (TLS, type, 0, 0, 0, NULL, caption, NULL, NULL, 0, f);
-  tdlib_send_message (TLS, (void *)tdcli_ptr_cb, cmd, chat_id, reply_id, 0, 0, NULL, content);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
 }
 
 void do_send_location (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   long long chat_id;
   int reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;
     reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[2].chat->id;
+    chat_id = args[2].chat_id;
     reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
-  double longitude = args[3].dval;
-  double latitude = args[4].dval;
+  double latitude = args[3].dval;
+  double longitude = args[4].dval;
 
-  union tdl_input_message_content *content = tdlib_create_input_message_content_venue (TLS, longitude, latitude, NULL, NULL, NULL, NULL);
-  tdlib_send_message (TLS, (void *)tdcli_ptr_cb, cmd, chat_id, reply_id, 0, 0, NULL, content);
+  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageLocation (TdCreateObjectLocation (latitude, longitude));
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
 }
 
 void do_send_contact (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   long long chat_id;
   int reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;    
     reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[2].chat->id;
+    chat_id = args[2].chat_id;
     reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
@@ -1315,28 +1646,26 @@ void do_send_contact (struct command *command, int arg_num, struct arg args[], s
   char *first_name = args[4].str;
   char *last_name = args[5].str;
 
-  union tdl_input_message_content *content = tdlib_create_input_message_content_contact (TLS, phone, first_name, last_name, 0);
-  tdlib_send_message (TLS, (void *)tdcli_ptr_cb, cmd, chat_id, reply_id, 0, 0, NULL, content);
+  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageContact (TdCreateObjectContact (phone, first_name, last_name, 0));
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
 }
 
 void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   long long chat_id;
   int reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;
     reply_id = args[2].msg_id.message_id;
   } else {
-    chat_id = args[2].chat->id;
+    chat_id = args[2].chat_id;
     reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
   long long from_chat_id = args[3].msg_id.chat_id;
   int msg_id = args[3].msg_id.message_id;
   
-  union tdl_input_message_content *content = tdlib_create_input_message_content_forward (TLS, from_chat_id, msg_id);
-  tdlib_send_message (TLS, (void *)tdcli_ptr_cb, cmd, chat_id, reply_id, 0, 0, NULL, content);
+  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageForwarded (from_chat_id, msg_id);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
 }
 
 /* }}} */
@@ -1344,22 +1673,22 @@ void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_
 /* {{{ EDITING SELF PROFILE */
 
 void do_change_profile_photo (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
   char *file_name = args[2].str;
-  tdlib_set_profile_photo (TLS, tdcli_empty_cb, cmd, file_name,  NULL);
+
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSetProfilePhoto (file_name, NULL), tdcli_cb, cmd);
 }
 
 void do_change_profile_name (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
   char *first_name = args[2].str;
   char *last_name = args[3].str;
-  tdlib_change_name (TLS, tdcli_empty_cb, cmd, first_name, last_name);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeName (first_name, last_name), tdcli_cb, cmd);
 }
 
 void do_change_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
   char *username = args[2].str;
-  tdlib_change_username (TLS, tdcli_empty_cb, cmd, username);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeUsername (username), tdcli_cb, cmd);
 }
 
 /* }}} */
@@ -1367,34 +1696,31 @@ void do_change_username (struct command *command, int arg_num, struct arg args[]
 /* {{{ WORKING WITH GROUP CHATS */
 
 void do_mute (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
-  union tdl_notification_settings_scope *scope = tdlib_create_notification_settings_scope (TLS, tdl_notification_settings_scope_chat, args[2].chat->id);
-  
+  long long chat_id = args[2].chat_id;
   int mute_for = (command->params[0]) ? (int)(args[3].num == NOT_FOUND ? 3600 : args[3].num) : 0;
-  struct tdl_chat_info *C = args[2].chat;
-  struct tdl_notification_settings *settings = tdlib_create_notification_settings (TLS, mute_for, C->notification_settings ? C->notification_settings->sound : "default", 0);
-  
-  tdlib_set_notification_settings (TLS, tdcli_empty_cb, cmd, scope, settings);
+
+  struct TdNotificationSettingsScope *scope = (void *)TdCreateObjectNotificationSettingsForChat (chat_id);
+  struct TdNotificationSettings *settings = TdCreateObjectNotificationSettings (mute_for, "default", 0); 
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSetNotificationSettings (scope, settings), tdcli_cb, cmd);
 }
 
 void do_chat_change_photo (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  long long chat_id = args[2].chat->id;
+  long long chat_id = args[2].chat_id;
   char *file_name = args[3].str;
-  tdlib_change_chat_photo (TLS, tdcli_empty_cb, cmd, chat_id, tdlib_create_input_file_local (TLS, file_name),  NULL);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChatPhoto (chat_id, (void *)TdCreateObjectInputFileLocal (file_name), NULL), tdcli_cb, cmd);
 }
 
 void do_chat_change_title (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  long long chat_id = args[2].chat->id;
+  long long chat_id = args[2].chat_id;
   char *title = args[3].str;
-  tdlib_change_chat_title (TLS, tdcli_empty_cb, cmd, chat_id, title);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChatTitle (chat_id, title), tdcli_cb, cmd);
 }
 
 void do_chat_info (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
+ /*
+  long long chat_id = 
   struct tdl_chat_info *C = args[2].chat;
 
   switch (C->chat->type) {
@@ -1409,134 +1735,136 @@ void do_chat_info (struct command *command, int arg_num, struct arg args[], stru
     break;
   case tdl_chat_type_secret_chat:
     break;
-  }
+  }*/
 }
 
 void do_chat_change_role (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  enum tdl_chat_member_role role;
+  struct TdChatMemberStatus *status = NULL;
 
   char *role_str = args[4].str;
   if (!strcmp (role_str, "creator")) {
-    role = tdl_chat_member_role_creator;
+    status = (void *)TdCreateObjectChatMemberStatusCreator ();
   } else if (!strcmp (role_str, "editor")) {
-    role = tdl_chat_member_role_editor;
+    status = (void *)TdCreateObjectChatMemberStatusEditor ();
   } else if (!strcmp (role_str, "moderator")) {
-    role = tdl_chat_member_role_moderator;
+    status = (void *)TdCreateObjectChatMemberStatusModerator ();
   } else if (!strcmp (role_str, "general")) {
-    role = tdl_chat_member_role_general;
+    status = (void *)TdCreateObjectChatMemberStatusMember ();
   } else if (!strcmp (role_str, "kicked")) {
-    role = tdl_chat_member_role_kicked;
+    status = (void *)TdCreateObjectChatMemberStatusKicked ();
   } else {
     fail_interface (TLS, cmd, EINVAL, "Unknown member role");
     return;
   }
   
-  long long chat_id = args[2].chat->id;
-  int user_id = args[3].chat->chat->user.id;
+  long long chat_id = args[2].chat_id;
+  int user_id = args[3].user_id;
 
-  cmd->refcnt ++;
-  tdlib_chat_change_member_role (TLS, tdcli_empty_cb, cmd, chat_id, user_id, role);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChatMemberStatus (chat_id, user_id, status), tdcli_cb, cmd);
 }
 
 void do_chat_add_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
-  long long chat_id = args[2].chat->id;
-  int user_id = args[3].chat->chat->user.id;
+  long long chat_id = args[2].chat_id;
+  int user_id = args[3].user_id;
   int fwd_msg_num = (args[4].num == NOT_FOUND) ? 0 : (int)args[4].num;
 
-  tdlib_chat_add_member (TLS, tdcli_empty_cb,cmd, chat_id, user_id, fwd_msg_num);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectAddChatMember (chat_id, user_id, fwd_msg_num), tdcli_cb, cmd);
 }
 
 void do_chat_del_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
+  long long chat_id = args[2].chat_id;
+  int user_id = args[3].user_id;
   
-  long long chat_id = args[2].chat->id;
-  int user_id = args[3].chat->chat->user.id;
-  
-  tdlib_chat_change_member_role (TLS, tdcli_empty_cb, cmd, chat_id, user_id, tdl_chat_member_role_kicked);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChatMemberStatus (chat_id, user_id, 
+   (void *)TdCreateObjectChatMemberStatusKicked ()), tdcli_cb, cmd);
 }
 
 void do_chat_join (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
-  long long chat_id = args[2].chat->id;
-  
-  tdlib_chat_add_member (TLS, tdcli_empty_cb, cmd, chat_id, TLS->my_id, 0);
+  long long chat_id = args[2].chat_id;
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectAddChatMember (chat_id, my_id, 0), tdcli_cb, cmd);
 }
 
 void do_chat_leave (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
+  long long chat_id = args[2].chat_id;
   
-  long long chat_id = args[2].chat->id;
-  
-  tdlib_chat_change_member_role (TLS, tdcli_empty_cb, cmd, chat_id, TLS->my_id, tdl_chat_member_role_kicked);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChatMemberStatus (chat_id, my_id, 
+   (void *)TdCreateObjectChatMemberStatusLeft ()), tdcli_cb, cmd);
 }
     
 void do_group_create (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   char *title = args[2].str;
+
+
   assert (args[3].vec_len <= 1000);
   
   int ids[1000];
-  
-  int i;
-  for (i = 0; i < args[2].vec_len; i++) {
-    ids[i] = args[3].vec[i].chat->chat->user.id;
-  }
 
-  cmd->refcnt ++;
-  tdlib_create_new_group_chat (TLS, (void *)tdcli_ptr_cb, cmd, title, args[2].vec_len, ids);
+  int i;
+  for (i = 0; i < args[3].vec_len; i++) {
+    ids[i] = args[3].vec[i].user_id;
+  }
+  
+  struct TdVectorInt *av = TdCreateObjectVectorInt (args[3].vec_len, ids);
+
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectCreateNewGroupChat (av, title), tdcli_cb, cmd);  
 }
     
 void do_channel_create (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   char *title = args[2].str;
   char *about = args[3].str;
-  
-  tdlib_create_new_channel_chat (TLS, (void *)tdcli_ptr_cb, cmd, title, (int)command->params[0], (int)command->params[1], about);
+
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectCreateNewChannelChat (title, (int)command->params[0], about), tdcli_cb, cmd);  
 }
 
 void do_chat_export_link (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
+  long long chat_id = args[2].chat_id;
   
-  long long chat_id = args[2].chat->id;
-  
-  tdlib_export_chat_invite_link (TLS, tdcli_string_cb, cmd, chat_id);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectExportChatInviteLink (chat_id), tdcli_cb, cmd);  
 }
 
 void do_chat_import_link (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
   char *link = args[2].str;
-
-  tdlib_import_chat_invite_link (TLS, tdcli_empty_cb, cmd, link);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectImportChatInviteLink (link), tdcli_cb, cmd);  
 }
 
 void do_chat_check_link (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
   char *link = args[2].str;
-
-  tdlib_check_chat_invite_link (TLS, (void *)tdcli_ptr_cb, cmd, link);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectCheckChatInviteLink (link), tdcli_cb, cmd);  
 }
 
 void do_channel_get_members (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
-  int channel_id = args[2].chat->chat->channel.id;
+  int channel_id = args[2].channel_id;
   int limit = (args[3].num == NOT_FOUND) ? 0 : (int)args[3].num;
   int offset = (args[4].num == NOT_FOUND) ? 0 : (int)args[4].num;
 
-  tdlib_get_channel_members (TLS, (void *)tdcli_vec_ptr_total_cb, cmd, channel_id, (int)command->params[0], offset, limit);
+  struct TdChannelMembersFilter *filter;
+  switch ((int)command->params[0]) {
+  case 0:
+    filter = (void *)TdCreateObjectChannelMembersRecent ();
+    break;
+  case 1:
+    filter = (void *)TdCreateObjectChannelMembersAdministrators ();
+    break;
+  case 2:
+    filter = (void *)TdCreateObjectChannelMembersKicked ();
+    break;
+  case 3:
+    filter = (void *)TdCreateObjectChannelMembersBots ();
+    break;
+  default:
+    assert (0);
+    filter = NULL;
+  }
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectGetChannelMembers (channel_id, filter, offset, limit), tdcli_cb, cmd);  
 }
 
 void do_group_upgrade (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
+  long long chat_id = args[2].chat_id;
 
-  long long chat_id = args[2].chat->id;
-
-  tdlib_migrate_group_to_channel (TLS, (void *)tdcli_ptr_cb, cmd, chat_id);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectMigrateGroupChatToChannelChat (chat_id), tdcli_cb, cmd);  
 }
 
 
@@ -1545,78 +1873,67 @@ void do_group_upgrade (struct command *command, int arg_num, struct arg args[], 
 /* {{{ WORKING WITH USERS */
 
 void do_add_contact (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
   char *phone = args[2].str;
   char *first_name = args[3].str;
   char *last_name = args[4].str;
 
-  struct tdl_input_contact *C = tdlib_create_input_contact (TLS, phone, first_name, last_name);
-  tdlib_import_contacts (TLS, (void *)tdcli_vec_ptr_cb, cmd, 1, &C);
+  struct TdContact *contact = TdCreateObjectContact (phone, first_name, last_name, 0);
+  struct TdVectorContact *contacts = (void *)TdCreateObjectVectorNullaryObject (1, (struct TdNullaryObject **)&contact);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectImportContacts (contacts), tdcli_cb, cmd);  
 }
 
 
 void do_block_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
-  int user_id = args[2].chat->chat->user.id;
-
-  tdlib_block_user (TLS, tdcli_empty_cb, cmd, user_id);
+  int user_id = args[2].user_id;
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectBlockUser (user_id), tdcli_cb, cmd);  
 }
 
 void do_unblock_user (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
-  int user_id = args[2].chat->chat->user.id;
-
-  tdlib_unblock_user (TLS, tdcli_empty_cb, cmd, user_id);
+  int user_id = args[2].user_id;
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectUnblockUser (user_id), tdcli_cb, cmd);  
 }
 /* }}} */
 
 /* WORKING WITH CHANNELS {{{ */
 
 void do_channel_change_about (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
-  int channel_id = args[2].chat->chat->channel.id;
+  int channel_id = args[2].channel_id;
   char *about = args[3].str;
 
-  tdlib_change_channel_about (TLS, tdcli_empty_cb, cmd, channel_id, about);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChannelAbout (channel_id, about), tdcli_cb, cmd);  
 }
 
 void do_channel_change_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
-  int channel_id = args[2].chat->chat->channel.id;
+  int channel_id = args[2].channel_id;
   char *username = args[3].str;
   if (*username == '@') { username ++; }
 
-  tdlib_change_channel_username (TLS, tdcli_empty_cb, cmd, channel_id, username);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChannelUsername (channel_id, username), tdcli_cb, cmd);  
 }
 
 void do_channel_edit (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   char *enabled = args[4].str;
   int mode;
-  if (!strcmp (enabled, "yes")) {
+  if (!strcmp (enabled, "yes") || !strcmp (enabled, "enabled")) {
     mode = 1;
-  } else if (!strcmp (enabled, "no")) {
+  } else if (!strcmp (enabled, "no") || !strcmp (enabled, "disabled")) {
     mode = 0;
   } else {
     fail_interface (TLS, cmd, EINVAL, "yes/no expected as third argument");
     return;
   }
   
-  cmd->refcnt ++;
-
-  int channel_id = args[2].chat->chat->channel.id;
+  int channel_id = args[2].channel_id;
   char *scope = args[3].str;
 
   if (!strcmp (scope, "invites")) {
-    tdlib_toggle_channel_invites (TLS, tdcli_empty_cb, cmd, channel_id, mode);
+    TdCClientSendCommand(TLS, (void *)TdCreateObjectToggleChannelInvites (channel_id, mode), tdcli_cb, cmd);  
   } else if (!strcmp (args[1].str, "sign")) {
-    tdlib_toggle_channel_sign_messages (TLS, tdcli_empty_cb, cmd, channel_id, mode);
+    TdCClientSendCommand(TLS, (void *)TdCreateObjectToggleChannelSignMessages (channel_id, mode), tdcli_cb, cmd);  
   } else {
-    in_command_decref (cmd);
     fail_interface (TLS, cmd, EINVAL, "invites/sign expected as second argument");
     return;
   }
@@ -1627,12 +1944,10 @@ void do_channel_edit (struct command *command, int arg_num, struct arg args[], s
 /* {{{ WORKING WITH DIALOG LIST */
 
 void do_dialog_list (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
   int limit = (args[2].num == NOT_FOUND) ? 10 : (int)args[2].num;
   int offset = (args[3].num == NOT_FOUND) ? 0 : (int)args[3].num;
   
-  tdlib_get_chats (TLS, (void *)tdcli_vec_ptr_cb, cmd, (1ull << 63) - 1 - offset, 0, limit);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectGetChats ((1ull << 63) - 1 - offset, 0, limit), tdcli_cb, cmd);  
 }
 
 void do_resolve_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1640,21 +1955,21 @@ void do_resolve_username (struct command *command, int arg_num, struct arg args[
   
   char *u = args[2].str;
   if (*u == '@') { u ++; }
-  tdlib_search_public_chat (TLS, (void *)tdcli_ptr_cb, cmd, u);
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSearchPublicChat (u), tdcli_cb, cmd);  
 }
 
 void do_contact_list (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
+  int limit = (args[2].num == NOT_FOUND) ? 10 : (int)args[2].num;
   
-  tdlib_get_contacts (TLS, (void *)tdcli_vec_ptr_cb, cmd);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSearchContacts ("", limit), tdcli_cb, cmd);  
 }
 
 void do_contact_delete (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
-  int user_id = args[2].chat->chat->user.id;
+  int user_id = args[2].user_id;
 
-  tdlib_delete_contacts (TLS, tdcli_empty_cb, cmd, 1, &user_id);
+  struct TdVectorInt *av = TdCreateObjectVectorInt (1, &user_id);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectDeleteContacts (av), tdcli_cb, cmd);  
 }
 
 /* }}} */
@@ -1662,12 +1977,10 @@ void do_contact_delete (struct command *command, int arg_num, struct arg args[],
 /* {{{ WORKING WITH ONE DIALOG */
 
 void do_mark_read (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
-  long long chat_id = args[2].chat->id;
-  int id = args[2].chat->top_message ? args[2].chat->top_message->id : 0;
-   
-  tdlib_view_messages (TLS, tdcli_empty_cb, cmd, chat_id, 1, &id);
+  long long chat_id = args[2].chat_id;
+  int id = 0;
+  struct TdVectorInt *av = TdCreateObjectVectorInt (1, &id);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectViewMessages (chat_id, av), tdcli_cb, cmd);  
 }
 
 struct chat_history_extra {
@@ -1678,63 +1991,64 @@ struct chat_history_extra {
   int limit;
   int last_msg_id;
   long long chat_id;
-  struct tdl_message **list;
+  struct TdMessage **list;
 };
 
 void do_send_history_query (struct chat_history_extra *e);
 
-void received_chat_history_slice (struct tdlib_state *TLS, void *extra, int success, int cnt, struct tdl_message **list) {
-  struct chat_history_extra *e = extra;
-  assert (cnt + e->current_pos <= e->limit);  
-  if (cnt == 0 || !success) {
-    if (success || e->current_pos) {
-      tdcli_vec_ptr_cb (TLS, e->cmd, 1, e->current_pos, (void **)e->list);
-    } else {
-      tdcli_vec_ptr_cb (TLS, e->cmd, 0, 0, NULL);
-    }
-  
-    if (e->current_pos > 0) {
-      int id = e->list[0]->id;
-      tdlib_view_messages (TLS, tdcli_empty_cb, NULL, e->chat_id, 1, &id);
-    }
+void free_chat_history_extra (struct chat_history_extra *e) {
+  int i;
+  for (i = 0; i < e->current_pos; i++) {
+    TdDestroyObjectMessage (e->list[i]);
+  }
+  free (e->list);
+  free (e);
+}
 
-    int i;
-    for (i = 0; i < e->current_pos; i++) {
-      tdlib_free_message (TLS, e->list[i]);
-    }
-    free (e->list);
-    free (e);
+void received_chat_history_slice (void *TLS, void *extra, struct TdNullaryObject *res) {
+  struct chat_history_extra *e = extra;
+  if (res->ID == CODE_Error) {
+    tdcli_cb (TLS, e->cmd, res);
+    free_chat_history_extra (e);
     return;
   }
+  assert (res->ID == CODE_Messages);
+  struct TdMessages *msgs = (void *)res;
+  int cnt = msgs->messages_->len;
+  assert (cnt + e->current_pos <= e->limit);  
+  
   if (cnt + e->current_pos > e->current_size) {
     e->list = realloc (e->list, sizeof (void *) * (cnt + e->current_pos));
     e->current_size = cnt + e->current_pos;
   }
+  
   int i;
   for (i = 0; i < cnt; i++) {
-    e->list[e->current_pos + i] = list[i];
-    e->list[e->current_pos + i]->refcnt ++; 
+    __sync_fetch_and_add (&msgs->messages_->data[i]->refcnt, 1);
+    e->list[e->current_pos ++] = msgs->messages_->data[i];
   }
-  e->current_pos += cnt;
 
-  if (e->current_pos >= e->limit) {
-    tdcli_vec_ptr_cb (TLS, e->cmd, 1, e->current_pos, (void **)e->list);
-  
-    if (e->current_pos > 0) {
-      int id = e->list[0]->id;
-      tdlib_view_messages (TLS, tdcli_empty_cb, NULL, e->chat_id, 1, &id);
-    }
-    int i;
+  if (cnt == 0 || e->current_pos >= e->limit) {
     for (i = 0; i < e->current_pos; i++) {
-      tdlib_free_message (TLS, e->list[i]);
+      __sync_fetch_and_add (&e->list[i]->refcnt, 1);
     }
-    free (e->list);
-    free (e);
+    struct TdVectorMessage *vec = (void *)TdCreateObjectVectorNullaryObject (e->current_pos, (void *)e->list);
+    struct TdMessages *msgs_vec = TdCreateObjectMessages (msgs->total_count_, vec);
+    tdcli_cb (TLS, e->cmd, (struct TdNullaryObject *)msgs_vec);
+    
+    if (e->current_pos > 0) {
+      int id = e->list[0]->id_;
+      struct TdVectorInt *av = TdCreateObjectVectorInt (1, &id);
+      TdCClientSendCommand(TLS, (void *)TdCreateObjectViewMessages (e->chat_id, av), tdcli_cb, NULL);  
+    }
+
+    TdDestroyObjectMessages (msgs_vec);
+    free_chat_history_extra (e);
     return;
   }
   
   if (cnt > 0) {
-    e->last_msg_id = list[cnt - 1]->id;
+    e->last_msg_id = e->list[e->current_pos - 1]->id_;
     e->current_offset = 0;
   }
 
@@ -1745,12 +2059,11 @@ void do_send_history_query (struct chat_history_extra *e) {
   int p = e->limit - e->current_pos;
   if (p > 100) { p = 100; }
   assert (p >= 0);
-  tdlib_get_chat_history (TLS, received_chat_history_slice, e, e->chat_id, e->last_msg_id, e->current_offset, p); 
+
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectGetChatHistory (e->chat_id, e->last_msg_id, e->current_offset, p), received_chat_history_slice, e);  
 }
 
 void do_history (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
   struct chat_history_extra *e = malloc (sizeof (*e));
   e->cmd = cmd;
   e->current_pos = 0;
@@ -1758,68 +2071,45 @@ void do_history (struct command *command, int arg_num, struct arg args[], struct
   e->current_offset = args[4].num != NOT_FOUND ? (int)args[4].num : 0;
   e->limit = args[3].num != NOT_FOUND ? (int)args[3].num : 40;
   e->last_msg_id = 0;
-  e->chat_id = args[2].chat->id;
+  e->chat_id = args[2].chat_id;
   e->list = NULL;
   
   do_send_history_query (e);
 }
 
 void do_send_typing (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  enum tdl_message_typing_action status;
+  struct TdSendMessageAction *action;
 
+  long long chat_id = args[2].chat_id;
   char *typing = args[3].str;
+  int progress = args[4].num == NOT_FOUND ? 0 : (int)args[4].num;
+
   if (!typing || !strcmp (typing, "typing")) {
-    status = tdl_message_typing_action_typing;
+    action = (void *)TdCreateObjectSendMessageTypingAction ();
   } else if (!strcmp (typing, "cancel")) {
-    status = tdl_message_typing_action_cancel;
+    action = (void *)TdCreateObjectSendMessageCancelAction ();
   } else if (!strcmp (typing, "record_video")) {
-    status = tdl_message_typing_action_record_video;
+    action = (void *)TdCreateObjectSendMessageRecordVideoAction ();
   } else if (!strcmp (typing, "upload_video")) {
-    status = tdl_message_typing_action_upload_video;
+    action = (void *)TdCreateObjectSendMessageUploadVideoAction (progress);
   } else if (!strcmp (typing, "record_voice")) {
-    status = tdl_message_typing_action_record_voice;
+    action = (void *)TdCreateObjectSendMessageRecordVoiceAction ();
   } else if (!strcmp (typing, "upload_voice")) {
-    status = tdl_message_typing_action_upload_voice;
+    action = (void *)TdCreateObjectSendMessageUploadVoiceAction (progress);
   } else if (!strcmp (typing, "upload_photo")) {
-    status = tdl_message_typing_action_upload_photo;
+    action = (void *)TdCreateObjectSendMessageUploadPhotoAction (progress);
   } else if (!strcmp (typing, "upload_document")) {
-    status = tdl_message_typing_action_upload_document;
+    action = (void *)TdCreateObjectSendMessageUploadDocumentAction (progress);
   } else if (!strcmp (typing, "choose_location")) {
-    status = tdl_message_typing_action_send_location;
+    action = (void *)TdCreateObjectSendMessageGeoLocationAction ();
   } else if (!strcmp (typing, "choose_contact")) {
-    status = tdl_message_typing_action_choose_contact;
+    action = (void *)TdCreateObjectSendMessageChooseContactAction ();
   } else {
     fail_interface (TLS, cmd, ENOSYS, "illegal typing status");
     return;
   }
-
-  cmd->refcnt ++;
-
-  long long chat_id = args[2].chat->id;
-
-  switch (status) {
-  case tdl_message_typing_action_typing:
-  case tdl_message_typing_action_cancel:
-  case tdl_message_typing_action_record_video:
-  case tdl_message_typing_action_record_voice:
-  case tdl_message_typing_action_send_location:
-  case tdl_message_typing_action_choose_contact:
-    {
-      union tdl_user_action *U = tdlib_create_user_typing_action_simple (TLS, status);
-      tdlib_send_chat_action (TLS, tdcli_empty_cb, cmd, chat_id, U);
-    }
-    break;
-  case tdl_message_typing_action_upload_video:
-  case tdl_message_typing_action_upload_voice:
-  case tdl_message_typing_action_upload_photo:
-  case tdl_message_typing_action_upload_document:
-    {
-      int progress = args[4].num == NOT_FOUND ? 0 : (int)args[4].num;
-      union tdl_user_action *U = tdlib_create_user_typing_action_upload (TLS, status, progress);
-      tdlib_send_chat_action (TLS, tdcli_empty_cb, cmd, chat_id, U);
-    }
-    break;
-  }
+  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSendChatAction (chat_id, action), tdcli_cb, cmd);  
 }
 
 /* }}} */
@@ -1830,34 +2120,30 @@ void do_send_typing (struct command *command, int arg_num, struct arg args[], st
 void do_search (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   int limit = (args[3].num == NOT_FOUND) ? 40 : (int)args[3].num;
   int from = (args[4].num == NOT_FOUND) ? 0 : (int)args[4].num;
-  
-  cmd->refcnt ++;
-  long long chat_id = args[2].chat ? args[2].chat->id : 0;
+ 
+  long long chat_id = args[2].chat_id;
   char *query = args[7].str;
 
-  if (chat_id) {
-    tdlib_search_chat_messages (TLS, (void *)tdcli_vec_ptr_cb, cmd, chat_id, query, from, limit, 0, tdl_search_messages_filter_empty);
+  if (chat_id != NOT_FOUND) {
+    TdCClientSendCommand(TLS, (void *)TdCreateObjectSearchChatMessages (chat_id, query, from, limit, (void *)TdCreateObjectSearchMessagesFilterEmpty ()), tdcli_cb, cmd);  
   } else {
-    tdlib_search_messages (TLS, (void *)tdcli_vec_ptr_cb, cmd, query, 0, 0, 0, limit);
+    TdCClientSendCommand(TLS, (void *)TdCreateObjectSearchMessages (query, 0, 0, 0, limit), tdcli_cb, cmd);  
   }
 }
 
 void do_delete_msg (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-
   long long chat_id = args[2].msg_id.chat_id;
   int msg_id = args[2].msg_id.message_id;
 
-  tdlib_delete_messages (TLS, tdcli_empty_cb, cmd, chat_id, 1, &msg_id);
+  struct TdVectorInt *vec = TdCreateObjectVectorInt (1, &msg_id);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectDeleteMessages (chat_id, vec), tdcli_cb, cmd);  
 }
 
 void do_get_message (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   long long chat_id = args[2].msg_id.chat_id;
   int msg_id = args[2].msg_id.message_id;
 
-  tdlib_get_message (TLS, (void *)tdcli_ptr_cb, cmd, chat_id, msg_id);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectGetMessage (chat_id, msg_id), tdcli_cb, cmd);  
 }
 
 /* }}} */
@@ -1865,13 +2151,11 @@ void do_get_message (struct command *command, int arg_num, struct arg args[], st
 /* {{{ BOT */
 
 void do_start_bot (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
-  int user_id = args[2].chat->chat->user.id;
-  long long chat_id = args[3].chat->id;
+  int user_id = args[2].user_id;
+  long long chat_id = args[3].chat_id;
   char *token = args[4].str;
 
-  tdlib_send_bot_start_message (TLS, (void *)tdcli_ptr_cb, cmd, user_id, chat_id, token);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSendBotStartMessage (user_id, chat_id, token), tdcli_cb, cmd);  
 }
 /* }}} */
 
@@ -1926,10 +2210,10 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"block_user", {{"user", ca_user}}, {}, do_block_user, print_success_gw, "Blocks user", NULL, {}},
   //{"broadcast", {ca_user, ca_period, ca_string_end, ca_none}, do_broadcast, "broadcast <user>+ <text>\tSends text to several users at once", NULL},
   
-  {"channel_get_admins", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel admins", NULL, {tdl_channel_members_filter_admins}},
-  {"channel_get_bots", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel bots", NULL, {tdl_channel_members_filter_bots}},
-  {"channel_get_kicked", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel kicked members", NULL, {tdl_channel_members_filter_kicked}},
-  {"channel_get_members", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel recent members", NULL, {tdl_channel_members_filter_recent}},
+  {"channel_get_admins", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel admins", NULL, {1}},
+  {"channel_get_bots", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel bots", NULL, {3}},
+  {"channel_get_kicked", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel kicked members", NULL, {2}},
+  {"channel_get_members", {{"channel", ca_channel}, {"limit", ca_number | ca_optional}, {"offset", ca_number | ca_optional}}, {{"total", ra_int}, {"members", ra_vector | ra_chat_member}}, do_channel_get_members, print_chat_members_gw, "Gets channel recent members", NULL, {0}},
   {"channel_change_about", {{"channel", ca_channel}, {"about", ca_string_end}}, {}, do_channel_change_about, print_success_gw, "Changes channel about info", NULL, {}},
   {"channel_change_username", {{"channel", ca_channel}, {"username", ca_string}}, {}, do_channel_change_username, print_success_gw, "Changes channel username", NULL, {}},
   {"channel_edit", {{"channel", ca_channel}, {"param", ca_string}, {"enabled", ca_string}}, {}, do_channel_edit, print_success_gw, "changes value of basic channel parameters. param=sign|invites. enabled=yes|no", NULL, {}}, 
@@ -1943,10 +2227,10 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"chat_join", {{"chat", ca_chat}}, {}, do_chat_join, print_success_gw, "Joins to chat", NULL, {}},
   {"chat_leave", {{"chat", ca_chat}}, {}, do_chat_leave, print_success_gw, "Leaves chat", NULL, {}},
   {"chat_check_invite_link", {{"link", ca_string}}, {{"info", ra_invite_link_info}}, do_chat_check_link, print_invite_link_gw, "Print info about chat by link", NULL, {}}, 
-  {"chat_create_broadcast", {{"title", ca_string}, {"about", ca_string}}, {{"chat", ra_chat}}, do_channel_create, print_chat_gw, "Creates broadcast channel", NULL, {1, 0}},
+  {"chat_create_broadcast", {{"title", ca_string}, {"about", ca_string}}, {{"chat", ra_chat}}, do_channel_create, print_chat_gw, "Creates broadcast channel", NULL, {0}},
   {"chat_create_group", {{"title", ca_string}, {"members", ca_user | ca_period}}, {{"chat", ra_chat}}, do_group_create, print_chat_gw, "Creates group chat", NULL, {}},
-  {"chat_create_supergroup", {{"title", ca_string}, {"about", ca_string}}, {{"chat", ra_chat}}, do_channel_create, print_chat_gw, "Creates supergroup channel", NULL, {0, 1}},
-  {"chat_export_invite_link", {{"chat", ca_chat}}, {{"link", ra_string}}, do_chat_export_link, print_string_gw, "Exports new invite link (and invalidates previous)", NULL, {}}, 
+  {"chat_create_supergroup", {{"title", ca_string}, {"about", ca_string}}, {{"chat", ra_chat}}, do_channel_create, print_chat_gw, "Creates supergroup channel", NULL, {1}},
+  {"chat_export_invite_link", {{"chat", ca_chat}}, {{"link", ra_string}}, do_chat_export_link, print_chat_link_gw, "Exports new invite link (and invalidates previous)", NULL, {}}, 
   {"chat_import_invite_link", {{"link", ca_string}}, {}, do_chat_import_link, print_success_gw, "Get chat by invite link and joins if possible", NULL, {}}, 
   
   {"chat_with_peer", {{"chat", ca_chat}}, {}, do_chat_with_peer, print_success_gw, "Interface option. All input will be treated as messages to this peer. Type /quit to end this mode", NULL, {}},
@@ -2198,7 +2482,7 @@ int complete_chat_command (union tdl_chat *P, int index, const char *text, int l
   }*/
 }
 
-int complete_username (int mode, int index, const char *text, ssize_t len, char **R) {  
+int complete_username (enum tdcli_chat_type mode, int index, const char *text, ssize_t len, char **R) {  
   *R = NULL;
   if (alias_queue.next == NULL) { return -1; }
   index ++;
@@ -2211,13 +2495,7 @@ int complete_username (int mode, int index, const char *text, ssize_t len, char 
   }
 
   while (A != &alias_queue) {
-    int type = -1;
-    if (A->type == -1) {
-      type = ((struct tdl_chat_info *)A->chat)->chat->type;
-    } else {
-      type = A->type;
-    }
-    if (mode == -1 || mode == type) {
+    if (mode == tdcli_any || mode == A->peer->peer_type) {
       if (!memcmp (A->name, text, len)) {
         *R = strdup (A->name);
         return index;
@@ -2237,7 +2515,7 @@ char *command_generator (const char *text, int state) {
   static char *command_pos;
   static ssize_t command_len;
 
-  if (cur_chat_mode_chat) {
+  if (cur_chat_mode_chat_id) {
     char *R = 0;
     index = complete_string_list (in_chat_commands, index, text, rl_point, &R);
     return R;
@@ -2273,11 +2551,11 @@ char *command_generator (const char *text, int state) {
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_user:
-    index = complete_username (tdl_chat_type_user, index, command_pos, command_len, &R);
+    index = complete_username (tdcli_user, index, command_pos, command_len, &R);
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_chat:
-    index = complete_username (-1, index, command_pos, command_len, &R);
+    index = complete_username (tdcli_any, index, command_pos, command_len, &R);
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_file_name:
@@ -2286,15 +2564,15 @@ char *command_generator (const char *text, int state) {
     R = rl_filename_completion_function (command_pos, state);
     return R;
   case ca_group:
-    index = complete_username (tdl_chat_type_group, index, command_pos, command_len, &R);
+    index = complete_username (tdcli_group, index, command_pos, command_len, &R);
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_secret_chat:
-    index = complete_username (tdl_chat_type_secret_chat, index, command_pos, command_len, &R);
+    index = complete_username (tdcli_secret_chat, index, command_pos, command_len, &R);
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_channel:
-    index = complete_username (tdl_chat_type_channel, index, command_pos, command_len, &R);
+    index = complete_username (tdcli_channel, index, command_pos, command_len, &R);
     if (c) { rl_line_buffer[rl_point] = c; }
     return R;
   case ca_modifier:
@@ -2338,16 +2616,16 @@ char *command_generator (const char *text, int state) {
   }
 }
 
-void print_fail (struct in_command *cmd) {
+void print_fail (struct in_command *cmd, struct TdError *error) {
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  mprintf (cmd->ev, "FAIL: %d: %s\n", TLS->error_code, TLS->error);
+  mprintf (cmd->ev, "FAIL: %d: %s\n", error->code_, error->message_);
   mprint_end (cmd->ev);
 }
 
-void fail_interface (struct tdlib_state *TLS, struct in_command *cmd, int error_code, const char *format, ...) {
+void fail_interface (void *TLS, struct in_command *cmd, int error_code, const char *format, ...) {
   static char error[1001];
 
   va_list ap;
@@ -2376,9 +2654,9 @@ void print_success (struct in_command *cmd) {
   }
 }
 
-void print_success_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
+void print_success_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) { 
+    print_fail (cmd, (struct TdError *)res); 
     return; 
   } else { 
     print_success (cmd); 
@@ -2386,50 +2664,56 @@ void print_success_gw (struct in_command *cmd, int success, struct res_arg *args
   }
 }
 
-void print_msg_success_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  print_success_gw (cmd, success, args);
+void print_msg_success_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  print_success_gw (cmd, res);
 }
 
-void print_msg_list_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_msg_list_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+
+  assert (res->ID == CODE_Messages);
+  struct TdMessages *msgs = (void *)res;
 
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
   }
-  int num = args[0].vec_len;
+  int num = msgs->messages_->len;
   int i;
   for (i = num - 1; i >= 0; i--) {    
-    struct tdl_message *M = args[0].vec[i].message;
+    struct TdMessage *M = msgs->messages_->data[i];
     print_message (cmd->ev, M);
   }
   mprint_end (cmd->ev);
 }
 
-void print_msg_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_msg_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+
+  assert (res->ID == CODE_Message);
 
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  print_message (cmd->ev, args[0].message);
+  print_message (cmd->ev, (struct TdMessage *)res);
   mprint_end (cmd->ev);
 }
 
-void print_invite_link_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_invite_link_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
-  
-  struct tdl_chat_invite_link_info *info = args[0].invite_link_info;
+ 
+  assert (res->ID == CODE_ChatInviteLinkInfo);
+  struct TdChatInviteLinkInfo *info = (void *)res;
 
   mprint_start (cmd->ev);
   mpush_color (cmd->ev, COLOR_YELLOW);
@@ -2437,10 +2721,10 @@ void print_invite_link_gw (struct in_command *cmd, int success, struct res_arg *
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
 
-  if (info->is_group) {
+  if (info->is_group_) {
     mprintf (cmd->ev, "Group ");
     mpush_color (cmd->ev, COLOR_MAGENTA);
-  } else if (info->is_supergroup_channel) {
+  } else if (info->is_supergroup_channel_) {
     mprintf (cmd->ev, "Supergroup ");
     mpush_color (cmd->ev, COLOR_MAGENTA);
   } else {
@@ -2448,7 +2732,7 @@ void print_invite_link_gw (struct in_command *cmd, int success, struct res_arg *
     mpush_color (cmd->ev, COLOR_CYAN);
   }
 
-  mprintf (cmd->ev, "%s", info->title);
+  mprintf (cmd->ev, "%s", info->title_);
 
   mpop_color (cmd->ev);
   mpop_color (cmd->ev);
@@ -2456,39 +2740,45 @@ void print_invite_link_gw (struct in_command *cmd, int success, struct res_arg *
   mprint_end (cmd->ev);
 }
 
-void print_user_list_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_user_list_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
-  
+ 
+  assert (res->ID == CODE_Users);
+  struct TdUsers *users = (void *)res;
+
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
   }
 
-  int num = args[0].vec_len;  
+  int num = users->users_->len;  
   int i;
   for (i = num - 1; i >= 0; i--) {
-    struct tdl_user *U = args[0].vec[i].user;
-    if (U->id != 0) {
-      print_user_name (cmd->ev, U, U->id);
+    struct TdUser *U = users->users_->data[i];
+    if (U->id_ != 0) {
+      print_user_name (cmd->ev, U, U->id_);
       mprintf (cmd->ev, "\n");
     }
   }
   mprint_end (cmd->ev);
 }
 
-void print_member (struct in_ev *ev, struct tdl_chat_member *U);
+void print_member (struct in_ev *ev, struct TdChatMember *U);
 
-void print_chat_members_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_chat_members_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
  
-  int total = args[0].num;
-  int num = args[1].vec_len;
+  assert (res->ID == CODE_ChatMembers);
+  struct TdChatMembers *M = (void *)res;
+
+  int total = M->total_count_;
+  int num = M->members_->len;
 
   mprint_start (cmd->ev);
   int i;
@@ -2498,93 +2788,99 @@ void print_chat_members_gw (struct in_command *cmd, int success, struct res_arg 
   }
   mprintf (cmd->ev, "Total %d members\n", total);
   for (i = num - 1; i >= 0; i--) {
-    struct tdl_chat_member *UL = args[1].vec[i].chat_member;
-    print_member (cmd->ev, UL);
+    struct TdChatMember *CM = M->members_->data[i];
+    print_member (cmd->ev, CM);
     mprintf (cmd->ev, "\n");
   }
   mpop_color (cmd->ev);
   mprint_end (cmd->ev);
 }
 
-void print_chat_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_chat_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
-  
-  struct tdl_chat_info *C = args[0].chat;
+ 
+  assert (res->ID == CODE_Chat);
+  struct TdChat *C = (void *)res;
 
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  print_chat_name (cmd->ev, C, C->id);
+  print_chat_name (cmd->ev, C, C->id_);
   mprintf (cmd->ev, "\n");
   mprint_end (cmd->ev);
 
   in_command_decref (cmd);
 }
 
-void print_user_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_user_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
  
-  struct tdl_user *U = args[0].user;
+  assert (res->ID == CODE_User);
+  struct TdUser *U = (void *)res;
 
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  print_user_name (cmd->ev, U, U->id);
+  print_user_name (cmd->ev, U, U->id_);
   mprintf (cmd->ev, "\n");
   mprint_end (cmd->ev);
 }
 
-void print_channel_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_channel_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
  
-  struct tdl_channel *C = args[0].channel;
+  assert (res->ID == CODE_Channel);
+  struct TdChannel *Ch = (void *)res;
   
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  struct telegram_cli_chat_extra *e = C->extra;
+  /*struct telegram_cli_chat_extra *e = C->extra;
   if (e && e->owner_type < 0) {
     struct tdl_chat_info *I = e->owner;
     print_chat_name (cmd->ev, I, I->id);
-  }
+  }*/
+  mprintf (cmd->ev, "channel#id%d", Ch->id_);
   mprintf (cmd->ev, "\n");
   mprint_end (cmd->ev);
 }
 
-void print_group_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_group_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
  
-  struct tdl_group *G = args[0].group;
+  assert (res->ID == CODE_Group);
+  struct TdGroup *G = (void *)res;
   
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  struct telegram_cli_chat_extra *e = G->extra;
+  /*struct telegram_cli_chat_extra *e = G->extra;
   if (e && e->owner_type < 0) {
     struct tdl_chat_info *I = e->owner;
     print_chat_name (cmd->ev, I, I->id);
-  }
+  }*/
+  mprintf (cmd->ev, "group#id%d", G->id_);
   mprintf (cmd->ev, "\n");
   mprint_end (cmd->ev);
 }
 
-void print_peer_gw (struct in_command *cmd, int success, struct res_arg *args) {
+/*void print_peer_gw (struct in_command *cmd, int success, struct res_arg *args) {
   if (!success) { 
     print_fail (cmd); 
     return; 
@@ -2605,47 +2901,73 @@ void print_peer_gw (struct in_command *cmd, int success, struct res_arg *args) {
   case tdl_chat_type_secret_chat:
     break;
   }
-}
+}*/
 
 
-void print_string_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_string_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+ 
+  assert (res->ID == CODE_TestString);
+  struct TdTestString *S = (void *)res;
 
   mprint_start (cmd->ev);
   mpush_color (cmd->ev, COLOR_YELLOW);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  mprintf (cmd->ev, "%s\n", args[0].str);
+  mprintf (cmd->ev, "%s\n", S->value_);
   mpop_color (cmd->ev);
   mprint_end (cmd->ev);
 }
 
-void print_filename_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_chat_link_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+ 
+  assert (res->ID == CODE_ChatInviteLink);
+  struct TdChatInviteLink *L = (void *)res;
+
+  mprint_start (cmd->ev);
+  mpush_color (cmd->ev, COLOR_YELLOW);
+  if (cmd->query_id) {
+    mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
+  }
+  mprintf (cmd->ev, "%s\n", L->invite_link_);
+  mpop_color (cmd->ev);
+  mprint_end (cmd->ev);
+}
+
+void print_filename_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
+  }
+  assert (res->ID == CODE_UpdateFile);
+  struct TdUpdateFile *U = (void *)res;
 
   mprint_start (cmd->ev);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld] ", cmd->query_id);
   }
-  mprintf (cmd->ev, "Saved to %s\n", args[0].str);
+  mprintf (cmd->ev, "Saved to %s\n", U->file_->path_);
   mprint_end (cmd->ev);
 }
 
-void open_filename_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void open_filename_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+  assert (res->ID == CODE_UpdateFile);
+  struct TdUpdateFile *U = (void *)res;
   
   static char buf[PATH_MAX];
-  if (snprintf (buf, sizeof (buf), OPEN_BIN, args[0].str) >= (int) sizeof (buf)) {
+  if (snprintf (buf, sizeof (buf), OPEN_BIN, U->file_->path_) >= (int) sizeof (buf)) {
     logprintf ("Open image command buffer overflow\n");
   } else {
     int pid = fork ();
@@ -2656,52 +2978,52 @@ void open_filename_gw (struct in_command *cmd, int success, struct res_arg *args
   }
 }
 
-void print_member (struct in_ev *ev, struct tdl_chat_member *U) {
-  switch (U->role) {
-    case tdl_chat_member_role_creator:
+void print_member (struct in_ev *ev, struct TdChatMember *U) {
+  switch (U->status_->ID) {
+    case CODE_ChatMemberStatusCreator:
       mprintf (ev, "Creator   ");
       break;
-    case tdl_chat_member_role_editor:
+    case CODE_ChatMemberStatusEditor:
       mprintf (ev, "Editor    ");
       break;
-    case tdl_chat_member_role_moderator:
+    case CODE_ChatMemberStatusModerator:
       mprintf (ev, "Moderator ");
       break;
-    case tdl_chat_member_role_general:
+    case CODE_ChatMemberStatusMember:
       mprintf (ev, "Member    ");
       break;
-    case tdl_chat_member_role_left:
+    case CODE_ChatMemberStatusLeft:
       mprintf (ev, "Left      ");
       break;
-    case tdl_chat_member_role_kicked:
+    case CODE_ChatMemberStatusKicked:
       mprintf (ev, "Kicked    ");
       break;
   }
 
 
-  struct tdl_user *Us = tdlib_instant_get_user (TLS, U->user_id);
-  print_user_name (ev, Us, U->user_id);
+  print_user_name (ev, NULL, U->user_id_);
   mprintf (ev, " invited by ");
-  struct tdl_user *I = tdlib_instant_get_user (TLS, U->inviter_user_id);
-  print_user_name (ev, I, U->inviter_user_id);
+  print_user_name (ev, NULL, U->inviter_user_id_);
   mprintf (ev, " ");
-  print_date_full (ev, U->join_date);
+  print_date_full (ev, U->join_date_);
 }
 
-void print_group_info_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_group_info_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+  assert (res->ID == CODE_GroupFull);
  
-  struct tdl_group *G = args[0].group;
+  struct TdGroupFull *G = (void *)res;
   mprint_start (cmd->ev);
 
   mpush_color (cmd->ev, COLOR_YELLOW);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
   }
-  mprintf (cmd->ev, "Chat ");
+  mprintf (cmd->ev, "Group group#id%d\n", G->group_->id_);
+  /*mprintf (cmd->ev, "Chat ");
   struct telegram_cli_chat_extra *e = G->extra;
   if (e && e->owner_type < 0) {
     struct tdl_chat_info *I = e->owner;
@@ -2727,25 +3049,27 @@ void print_group_info_gw (struct in_command *cmd, int success, struct res_arg *a
     mprintf (cmd->ev, "\t\t");
     print_member (cmd->ev, G->full->members[i]);
     mprintf (cmd->ev, "\n");
-  }
+  }*/
   mpop_color (cmd->ev);
   mprint_end (cmd->ev);
 }
 
-void print_channel_info_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_channel_info_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+  assert (res->ID == CODE_ChannelFull);
  
+  struct TdChannelFull *Ch = (void *)res;
   mprint_start (cmd->ev);
-  struct tdl_channel *C = args[0].channel;
 
   mpush_color (cmd->ev, COLOR_YELLOW);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
   }
-  if (C->is_supergroup) {
+  mprintf (cmd->ev, "Channel channel#id%d\n", Ch->channel_->id_);
+  /*if (C->is_supergroup) {
     mprintf (cmd->ev, "Supergroup ");
   } else {
     mprintf (cmd->ev, "Channel ");
@@ -2785,97 +3109,90 @@ void print_channel_info_gw (struct in_command *cmd, int success, struct res_arg 
     }
   }
 
-  mprintf (cmd->ev, "\t%d members, %d admins, %d kicked\n", C->full->members_cnt, C->full->admins_cnt, C->full->kicked_cnt);
+  mprintf (cmd->ev, "\t%d members, %d admins, %d kicked\n", C->full->members_cnt, C->full->admins_cnt, C->full->kicked_cnt);*/
   mpop_color (cmd->ev);
   mprint_end (cmd->ev);
 }
 
-void print_user_info_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_user_info_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
+  assert (res->ID == CODE_UserFull);
+  struct TdUserFull *U = (void *)res;
 
-  struct tdl_user *U = args[0].user;
   mprint_start (cmd->ev);
   mpush_color (cmd->ev, COLOR_YELLOW);
   if (cmd->query_id) {
     mprintf (cmd->ev, "[id=%lld]\n", cmd->query_id);
   }
-  if (U->deleted) {
+  mprintf (cmd->ev, "User ");
+  /*if (U->user_->deleted_) {
     mprintf (cmd->ev, "Deleted user ");
   } else {
-    mprintf (cmd->ev, "User ");
-  }
-  if (U->is_verified) {
+  }*/
+  if (U->user_->is_verified_) {
     mprintf (cmd->ev, "[verified] ");
   }
-  print_user_name (cmd->ev, U, U->id);
-  if (U->username) {
-    mprintf (cmd->ev, " @%s", U->username);
+  print_user_name (cmd->ev, U->user_, U->user_->id_);
+  if (U->user_->username_) {
+    mprintf (cmd->ev, " @%s", U->user_->username_);
   }
-  mprintf (cmd->ev, " (#%d):\n", U->id);
-  mprintf (cmd->ev, "\tphone: %s\n", U->phone_number);
+  mprintf (cmd->ev, " (#%d):\n", U->user_->id_);
+  mprintf (cmd->ev, "\tphone: %s\n", U->user_->phone_number_);
   mprintf (cmd->ev, "\t");
-  print_user_status (cmd->ev, U->status);
+  print_user_status (cmd->ev, U->user_->status_);
   mprintf (cmd->ev, "\n");
 
-  if (U->photo) {
-    if (U->photo->big || U->photo->small) {
-      mprintf (cmd->ev, "\tphoto:");
-      if (U->photo->big) {
-        mprintf (cmd->ev, " big:[photo %d]", U->photo->big->id);
-      }
-      if (U->photo->small) {
-        mprintf (cmd->ev, " small:[photo %d]", U->photo->small->id);
-      }
-      mprintf (cmd->ev, "\n");
+  if (U->user_->profile_photo_) {
+    if (U->user_->profile_photo_) {
+      mprintf (cmd->ev, "\tphoto: [photo %d]\n", U->user_->profile_photo_->big_->id_);
     }
   }
 
-  if (U->full->bot_info) {
-    mprintf (cmd->ev, "\tdescription: %s\n", U->full->bot_info->description);
+  if (U->bot_info_) {
+    mprintf (cmd->ev, "\tdescription: %s\n", U->bot_info_->description_);
     mprintf (cmd->ev, "\tcommands:\n");
 
     int i;
-    for (i = 0; i < U->full->bot_info->commands_cnt; i++) {
-      mprintf (cmd->ev, "\t\t/%s: %s\n", U->full->bot_info->commands[i]->command, U->full->bot_info->commands[i]->description);
+    for (i = 0; i < U->bot_info_->commands_->len; i++) {
+      struct TdBotCommand *C = U->bot_info_->commands_->data[i];
+      mprintf (cmd->ev, "\t\t/%s: %s\n", C->command_, C->description_);
     }
   }
   mpop_color (cmd->ev);
   mprint_end (cmd->ev);
 }
 
-void print_peer_info_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_peer_info_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
 
-  union tdl_chat *C = args[0].peer;
-
-  switch (C->type) {
-  case tdl_chat_type_user:
-    print_user_info_gw (cmd, success, args);
-    break;
-  case tdl_chat_type_group:
-    print_group_info_gw (cmd, success, args);
-    break;
-  case tdl_chat_type_channel:
-    print_channel_info_gw (cmd, success, args);
-    break;
-  case tdl_chat_type_secret_chat:
-    break;
+  switch (res->ID) {
+  case CODE_UserFull:
+    return print_user_info_gw (cmd, res);
+  case CODE_ChannelFull:
+    return print_channel_info_gw (cmd, res);
+  case CODE_GroupFull:
+    return print_group_info_gw (cmd, res);
+  default:
+    assert (0);
   }
 }
 
-void print_dialog_list_gw (struct in_command *cmd, int success, struct res_arg *args) {
-  if (!success) { 
-    print_fail (cmd); 
-    return; 
+void print_dialog_list_gw (struct in_command *cmd, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    print_fail (cmd, (struct TdError *)res);
+    return;
   }
 
-  int num = args[0].vec_len;
+  assert (res->ID == CODE_Chats);
+  struct TdChats *chats = (void *)res;
+
+  int num = chats->chats_->len;
   
   mprint_start (cmd->ev);
   mpush_color (cmd->ev, COLOR_YELLOW);
@@ -2885,9 +3202,9 @@ void print_dialog_list_gw (struct in_command *cmd, int success, struct res_arg *
   int i;
   for (i = num - 1; i >= 0; i--) {
     mprintf (cmd->ev, "Dialog ");
-    struct tdl_chat_info *C = args[0].vec[i].chat;    
-    print_chat_name (cmd->ev, C, C->id);
-    mprintf (cmd->ev, " unread\n");
+    struct TdChat *C = chats->chats_->data[i];
+    print_chat_name (cmd->ev, C, C->id_);
+    mprintf (cmd->ev, "\n");
   }
   mpop_color (cmd->ev);
   mprint_end (cmd->ev);
@@ -2897,7 +3214,7 @@ void interpreter_chat_mode (struct in_command *cmd) {
   char *line = cmd->line;
   if (line == NULL || /* EOF received */
           !strncmp (line, "/exit", 5) || !strncmp (line, "/quit", 5)) {
-    cur_chat_mode_chat = NULL;
+    cur_chat_mode_chat_id = 0;
     update_prompt ();
     return;
   }
@@ -2915,7 +3232,7 @@ void interpreter_chat_mode (struct in_command *cmd) {
     e->current_offset = 0;
     e->limit = limit;
     e->last_msg_id = 0;
-    e->chat_id = cmd->chat_mode_chat->id;
+    e->chat_id = cmd->chat_mode_chat_id;
     e->list = NULL;
   
     do_send_history_query (e);
@@ -2924,41 +3241,22 @@ void interpreter_chat_mode (struct in_command *cmd) {
   if (strlen (line) > 0) {
     cmd->refcnt ++;
 
-    tdlib_view_messages (TLS, tdcli_empty_cb, NULL, cmd->chat_mode_chat->id, 1, &cmd->chat_mode_chat->top_message->id);
+    //tdlib_view_messages (TLS, tdcli_empty_cb, NULL, cmd->chat_mode_chat->id, 1, &cmd->chat_mode_chat->top_message->id);
     
-    union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, line, 0, disable_msg_preview, 1);
-    tdlib_send_message (TLS, (void *)tdcli_ptr_cb, cmd, cmd->chat_mode_chat->id, 0, 0, 0, NULL, content);
-  }
-}
-
-int eq_str (char *a, char *b) {
-  return a ? b ? strcmp (a, b) : 0 : b ? 0 : 1;
-}
-
-int upd_str (char **a, char *b) {
-  if (*a) {
-    if (!b || strcmp (*a, b)) {
-      free (*a);
-      *a = b ? strdup (b) : NULL;
-      return 1;
-    } else {
-      return 0;
-    }
-  } else {
-    *a = b ? strdup (b) : NULL;
-    return b ? 1 : 0;
+    //union tdl_input_message_content *content = tdlib_create_input_message_content_text (TLS, line, 0, disable_msg_preview, 1);
+    //tdlib_send_message (TLS, (void *)tdcli_ptr_cb, cmd, cmd->chat_mode_chat->id, 0, 0, 0, NULL, content);
   }
 }
 
 struct update_subscriber {
   void *extra;
   struct update_subscriber *next, *prev;
-  void (*cb)(void *extra, struct update_description *D, struct res_arg args[]);
+  void (*cb)(void *extra, struct TdUpdate *U);
 };
 
 struct update_subscriber update_subscribers_queue;
 
-struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void *, struct update_description *, struct res_arg [])) {
+struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void *, struct TdUpdate *)) {
   struct update_subscriber *Q = &update_subscribers_queue;
   if (!Q->next) { 
     Q->next = Q;
@@ -2974,33 +3272,372 @@ struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void
   return a;
 }
 
-void do_update (struct update_description *D, struct res_arg args[]) {
-  if (!enable_json) {
-    if (D->default_cb) {
-      D->default_cb (NULL, D, args);
+void default_update_handler (void *arg, struct TdUpdate *Upd) {
+  struct in_ev *ev = arg;
+  switch (Upd->ID) {
+  case CODE_UpdateNewMessage:
+    {
+      struct TdUpdateNewMessage *U = (void *)Upd;
+      print_message (ev, U->message_);
+      if (alert_sound && !U->disable_notification_) {
+        play_sound ();
+      }
     }
+    break;
+  case CODE_UpdateMessageSendSucceeded:
+    {
+      struct TdUpdateNewMessage *U = (void *)Upd;
+      print_message (ev, U->message_);
+    }
+    break;
+  case CODE_UpdateMessageSendFailed:
+    break;
+  case CODE_UpdateMessageContent:
+    break;
+  case CODE_UpdateMessageEdited:
+    break;
+  case CODE_UpdateMessageViews:
+    break;
+  case CODE_UpdateChat:
+    break;
+  case CODE_UpdateChatTopMessage:
+    break;
+  case CODE_UpdateChatOrder:
+    break;
+  case CODE_UpdateChatTitle:
+    break;
+  case CODE_UpdateChatPhoto:
+    break;
+  case CODE_UpdateChatReadInbox:
+    break;
+  case CODE_UpdateChatReadOutbox:
+    break;
+  case CODE_UpdateChatReplyMarkup:
+    break;
+  case CODE_UpdateChatDraftMessage:
+    break;
+  case CODE_UpdateNotificationSettings:
+    break;
+  case CODE_UpdateDeleteMessages:
+    break;
+  case CODE_UpdateUserAction:
+    break;
+  case CODE_UpdateUserStatus:
+    break;
+  case CODE_UpdateUser:
+    break;
+  case CODE_UpdateGroup:
+    break;
+  case CODE_UpdateChannel:
+    break;
+  case CODE_UpdateSecretChat:
+    break;
+  case CODE_UpdateChannelFull:
+    break;
+  case CODE_UpdateUserBlocked:
+    break;
+  case CODE_UpdateNewAuthorization:
+    break;
+  case CODE_UpdateFileProgress:
+    break;
+  case CODE_UpdateFile:
+    break;
+  case CODE_UpdateOption:
+    break;
+  case CODE_UpdateStickers:
+    break;
+  case CODE_UpdateSavedAnimations:
+    break;
+  case CODE_UpdateNewInlineQuery:
+    break;
+  case CODE_UpdateNewChosenInlineResult:
+    break;
+  case CODE_UpdateNewCallbackQuery:
+    break;
+  case CODE_UpdateNewInlineCallbackQuery:
+    break;
+  }
+}
+
+void do_update (struct TdUpdate *U) {
+  if (!enable_json) {
+    default_update_handler (NULL, U);
   } else {
     #ifdef USE_JSON
-    json_update_cb (NULL, D, args);
+    json_update_cb (NULL, U);
     #endif
   }
 
   struct update_subscriber *a = update_subscribers_queue.next;
   while (a && a != &update_subscribers_queue) {
-    a->cb (a->extra, D, args);
+    a->cb (a->extra, U);
     a = a->next;
   }
 }
 
-void default_on_new_msg (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-  struct in_ev *ev = ev;
+void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
+  switch (Upd->ID) {
+  case CODE_UpdateNewMessage:
+    break;
+  case CODE_UpdateMessageSendSucceeded:
+    break;
+  case CODE_UpdateMessageSendFailed:
+    break;
+  case CODE_UpdateMessageContent:
+    break;
+  case CODE_UpdateMessageEdited:
+    break;
+  case CODE_UpdateMessageViews:
+    break;
+  case CODE_UpdateChat:
+    {
+      struct TdUpdateChat *U = (void *)Upd;
+      on_chat_update (U->chat_);
+    }
+    break;
+  case CODE_UpdateChatTopMessage:
+    {
+      struct TdUpdateChatTopMessage *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
 
-  mprint_start (NULL);
-  print_message (NULL, args[0].message);
-  mprint_end (NULL);
+      if (C) {
+        if (C->top_message_) {
+          TdDestroyObjectMessage (C->top_message_);          
+        }
+        C->top_message_ = U->top_message_;
+        if (U->top_message_) {
+          __sync_fetch_and_add (&U->top_message_->refcnt, 1);
+        }
+      }
+    }
+    break;
+  case CODE_UpdateChatOrder:
+    {
+      struct TdUpdateChatOrder *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
+
+      if (C) {
+        C->order_ = U->order_;
+      }
+    }
+    break;
+  case CODE_UpdateChatTitle:
+    {
+      struct TdUpdateChatTitle *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
+
+      if (C) {
+        if (C->title_) {
+          free (C->title_);
+        }
+        C->title_ = U->title_ ? strdup (U->title_) : NULL;
+        on_chat_update (C);
+      }
+    }
+    break;
+  case CODE_UpdateChatPhoto:
+    {
+      struct TdUpdateChatPhoto *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
+
+      if (C) {
+        if (C->photo_) {
+          TdDestroyObjectChatPhoto (C->photo_);
+        }
+        C->photo_ = U->photo_;
+        if (C->photo_) {
+          __sync_fetch_and_add (&C->photo_->refcnt, 1);
+        }
+      }
+    }
+    break;
+  case CODE_UpdateChatReadInbox:
+    {
+      struct TdUpdateChatReadInbox *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
+
+      if (C) {
+        C->unread_count_ = U->unread_count_;
+        C->last_read_inbox_message_id_ = U->last_read_inbox_message_id_;
+      }
+    }
+    break;
+  case CODE_UpdateChatReadOutbox:
+    {
+      struct TdUpdateChatReadOutbox *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
+
+      if (C) {
+        C->last_read_outbox_message_id_ = U->last_read_outbox_message_id_;
+      }
+    }
+    break;
+  case CODE_UpdateChatReplyMarkup:
+    {
+      struct TdUpdateChatReplyMarkup *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
+
+      if (C) {
+        C->reply_markup_message_id_ = U->reply_markup_message_id_;
+      }
+    }
+    break;
+  case CODE_UpdateChatDraftMessage:
+    {
+      struct TdUpdateChatDraftMessage *U = (void *)Upd;
+      struct TdChat *C = get_chat (U->chat_id_);
+
+      if (C) {
+        if (C->draft_message_) {
+          TdDestroyObjectDraftMessage (C->draft_message_);
+        }
+        C->draft_message_ = U->draft_message_;
+        if (C->draft_message_) {
+          __sync_fetch_and_add (&C->draft_message_->refcnt, 1);
+        }
+      }
+    }
+    break;
+  case CODE_UpdateNotificationSettings:
+    break;
+  case CODE_UpdateDeleteMessages:
+    break;
+  case CODE_UpdateUserAction:
+    break;
+  case CODE_UpdateUserStatus:
+    {
+      struct TdUpdateUserStatus *U = (void *)Upd;
+      struct TdUser *C = get_user (U->user_id_);
+      if (C) {
+        if (C->status_) {
+          TdDestroyObjectUserStatus (C->status_);
+        }
+        C->status_ = U->status_;
+        if (C->status_) {
+          __sync_fetch_and_add (&C->status_->refcnt, 1);
+        }
+      }
+    }
+    break;
+  case CODE_UpdateUser:
+    {
+      struct TdUpdateUser *U = (void *)Upd;
+      on_user_update (U->user_);
+    }
+    break;
+  case CODE_UpdateGroup:
+    {
+      struct TdUpdateGroup *U = (void *)Upd;
+      on_group_update (U->group_);
+    }
+    break;
+  case CODE_UpdateChannel:
+    {
+      struct TdUpdateChannel *U = (void *)Upd;
+      on_channel_update (U->channel_);
+    }
+    break;
+  case CODE_UpdateSecretChat:
+    {
+      struct TdUpdateSecretChat *U = (void *)Upd;
+      on_secret_chat_update (U->secret_chat_);
+    }
+    break;
+  case CODE_UpdateChannelFull:
+    {
+      struct TdUpdateChannelFull *U = (void *)Upd;
+      on_channel_update (U->channel_full_->channel_);
+      struct tdcli_peer PB;
+      PB.peer_type = CODE_Channel;
+      PB.peer_id = U->channel_full_->channel_->id_;
+      struct tdcli_peer *P = tree_lookup_peer_chat (tdcli_peers, &PB);
+
+      if (P) {
+        if (P->channel_full) {
+          TdDestroyObjectChannelFull (P->channel_full);
+        }
+        P->channel_full = U->channel_full_;
+        if (P->channel_full) {
+          __sync_fetch_and_add (&P->channel_full->refcnt, 1);
+        }
+      }
+    }
+    break;
+  case CODE_UpdateUserBlocked:
+    {
+      struct TdUpdateUserBlocked *U = (void *)Upd;
+      struct TdUserFull *C = get_user_full (U->user_id_);
+      if (C) {
+        C->is_blocked_ = U->is_blocked_;
+      }
+    }
+    break;
+  case CODE_UpdateNewAuthorization:
+    break;
+  case CODE_UpdateFileProgress:
+    break;
+  case CODE_UpdateFile:
+    {
+      struct TdUpdateFile *U = (void *)Upd;
+      if (U->file_->path_) {
+        struct file_wait *W = tree_lookup_file_wait (file_wait_tree, (void *)&U->file_->id_);
+        if (W) {
+          struct file_wait_cb *cb = W->first_cb;
+          while (cb) {
+            cb->callback (TLS, cb->callback_extra, (void *)U);
+            struct file_wait_cb *n = cb->next;
+            free (cb);
+            cb = n;
+          }
+          file_wait_tree = tree_delete_file_wait (file_wait_tree, W);
+          free (W);
+        }
+      }
+    }
+    break;
+  case CODE_UpdateOption:
+    {
+      struct TdUpdateOption *U = (void *)Upd;
+      if (!strcmp (U->name_, "my_id")) {
+        assert (U->value_->ID == CODE_OptionInteger);
+        struct TdOptionInteger *O = (void *)U->value_;
+        my_id = O->value_;
+      } else if (!strcmp (U->name_, "connection_state")) {
+        assert (U->value_->ID == CODE_OptionString);
+        struct TdOptionString *O = (void *)U->value_;
+        if (conn_state) {
+          free (conn_state);
+        }
+        conn_state = strdup (O->value_);
+        update_prompt ();
+      }
+    }
+    break;
+  case CODE_UpdateStickers:
+    break;
+  case CODE_UpdateSavedAnimations:
+    break;
+  case CODE_UpdateNewInlineQuery:
+    break;
+  case CODE_UpdateNewChosenInlineResult:
+    break;
+  case CODE_UpdateNewCallbackQuery:
+    break;
+  case CODE_UpdateNewInlineCallbackQuery:
+    break;
+  default:
+    {
+      mprint_start (NULL);
+      char *s = TdSerializeUpdate ((struct TdUpdate *)Upd);
+      mprintf (NULL, "Unhandled update:\n%s\n", s);
+      free (s);
+      mprint_end (NULL);
+    }
+    break;
+  }
+  do_update (Upd);
 }
-
+/*
 void on_new_msg (struct tdlib_state *TLSR, struct tdl_message *M, int disable_notifications) {
   assert (TLSR == TLS);
   if (alert_sound && !disable_notifications) {
@@ -3048,119 +3685,6 @@ void on_edit_msg (struct tdlib_state *TLSR, struct tdl_message *M) {
   do_update (&D, args);
 
   free_res_arg_list (args, 10);
-}
-
-void add_alias_internal (struct telegram_cli_chat_extra *e, char *alias) {
-  if (!alias) { return; }
-  e->aliases_cnt ++;
-  e->aliases = realloc (e->aliases, sizeof (void *) * (e->aliases_cnt));
-  e->aliases[e->aliases_cnt - 1] = strdup (alias);
-
-  add_alias (alias, e->owner_type, e->owner);
-}
-
-void del_alias_internal (struct telegram_cli_chat_extra *e, char *alias) {
-  if (!alias) { return; }
-  int i;
-  for (i = 0; i < e->aliases_cnt; i++) {
-    if (!strcmp (e->aliases[i], alias)) {
-      del_alias (alias);
-      e->aliases[i] = e->aliases[e->aliases_cnt - 1];
-      free (e->aliases[i]);
-      e->aliases = realloc (e->aliases, sizeof (void *) * (e->aliases_cnt - 1));
-      e->aliases_cnt --;
-      return;
-    }
-  }
-}
-
-void sub_alias_internal (struct telegram_cli_chat_extra *e, char *alias, char *new_alias) {
-  if (!alias && !new_alias) { return; }
-  if (!alias) { return add_alias_internal (e, new_alias); }
-  if (!new_alias) { return del_alias_internal (e, alias); }
-  if (!strcmp (alias, new_alias)) { return; }
-
-  int i;
-  for (i = 0; i < e->aliases_cnt; i++) {
-    if (!strcmp (e->aliases[i], alias)) {
-      del_alias (alias);
-      free (e->aliases[i]);
-      e->aliases[i] = strdup (new_alias);
-      add_alias (new_alias, e->owner_type, e->owner);
-      return;
-    }
-  }
-}
-
-void upd_aliases_internal (struct telegram_cli_chat_extra *e) {
-  int i;
-  for (i = 0; i < e->aliases_cnt; i++) {
-    del_alias (e->aliases[i]);
-    add_alias (e->aliases[i], e->owner_type, e->owner);
-  }
-}
-
-int utf8_char_len (unsigned char c) {
-  if ((c & 0x80) == 0) { return 1; }
-  if ((c & 0xc0) == 0x80) { return 2; }
-  if ((c & 0xe0) == 0xc0) { return 3; }
-  if ((c & 0xf0) == 0xe0) { return 4; }
-  if ((c & 0xf8) == 0xf0) { return 5; }
-  if ((c & 0xfc) == 0xf8) { return 6; }
-  if ((c & 0xfe) == 0xfc) { return 7; }
-  return 8;
-}
-
-char *generate_alias_title (struct telegram_cli_chat_extra *e, const char *title) {
-  if (!title) { return NULL; }
-  static char s[256];
-  ssize_t l = strlen (title);
-  if (l >= 250) { l = 250; }
-  memcpy (s, title, l);
-  s[l] = 0;
-
-  int p = 0;
-  while (p < l) {
-    if ((s[p] <= 32 && s[p] >= 0) || (p == 0 && s[p] == '@') || s[p] == '#') {
-      s[p] = '_';
-    }
-    p ++;
-  }
-
-  p = 0;
-  while (1) {
-    struct chat_alias *A = get_by_alias (s);
-    if (!A) { break; }
-    if ((A->chat == e->owner) && A->type == e->owner_type) {
-      break;
-    }
-    sprintf (s + l, "#%d", ++p);
-  }
-  return s;
-}
-
-char *generate_alias_name (struct telegram_cli_chat_extra *e, char *first_name, char *last_name) {
-  if (!first_name && !last_name) { return NULL; }
-  if (!first_name) { return generate_alias_title (e, last_name); }
-  if (!last_name) { return generate_alias_title (e, first_name); }
-  static char s[256];
-  snprintf (s, 250, "%s %s", first_name, last_name);
-  return generate_alias_title (e, s);
-}
-
-char *generate_alias_username (char *username) {
-  if (!username) { return NULL; }
-  static char s[256];
-  s[0] = '@';
-  strncpy (s + 1, username, 250);
-  char *t = s + 1;
-  while (*t) {
-    if (*t >= 'A' && *t <= 'Z') {
-      *t = (char)(*t + 'a' - 'A');
-    }
-    t ++;
-  }
-  return s;
 }
 
 
@@ -3757,7 +4281,7 @@ struct tgl_update_callback upd_cb = {
   .update_file_progress = on_update_file_progress,
   .update_file = on_update_file
 
-};
+};*/
 
 int parse_argument_modifier (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
   int opt = (D->type & ca_optional) | (D->type & ca_period);
@@ -3971,31 +4495,31 @@ int parse_argument_chat (struct in_command *cmd, struct arg *A, struct command_a
   next_token ();
 
   if (cur_token_quoted || cur_token_len < 0) {
-    A->chat = NULL;
+    A->chat_id = NOT_FOUND;
     if (opt) {
       line_ptr = save;
       return -5;
     }
     return -1;
   } else if (cur_token_end_str) {
-    A->chat = NULL;
+    A->chat_id = NOT_FOUND;
     return -3;
   } else {
-    int m = -1;
-    if (op == ca_user) { m = tdl_chat_type_user; }
-    if (op == ca_group) { m = tdl_chat_type_group; }
-    if (op == ca_channel) { m = tdl_chat_type_channel; }
-    if (op == ca_secret_chat) { m = tdl_chat_type_secret_chat; }            
+    int m = tdcli_any;
+    if (op == ca_user) { m = tdcli_user; }
+    if (op == ca_group) { m = tdcli_group; }
+    if (op == ca_channel) { m = tdcli_channel; }
+    //if (op == ca_secret_chat) { m = tdlcli_secret_chat; }            
 
     char *token = strndup (cur_token, cur_token_len);
-    struct tdl_chat_info *C = cur_token_peer (token, m, cmd);
+    long long chat_id = cur_token_peer (token, m, cmd);
     free (token);
             
-    if (C == (void *)-1l) {
+    if (chat_id == WAIT_AIO) {
       return -2;
     }
 
-    if (!C) {
+    if (chat_id == NOT_FOUND) {
       if (opt) {
         line_ptr = save;
         return -5;
@@ -4003,7 +4527,7 @@ int parse_argument_chat (struct in_command *cmd, struct arg *A, struct command_a
         return -1;
       }
     } else { 
-      A->chat = C;
+      A->chat_id = chat_id;
       return 0;
     }
   }
@@ -4207,7 +4731,7 @@ void interpreter_ex (struct in_command *cmd) {
   #endif
   char *line = cmd->line;
   force_end_mode = 1;
-  if (cmd->chat_mode_chat) {
+  if (cmd->chat_mode_chat_id) {
     interpreter_chat_mode (cmd);
     return;
   }
@@ -4252,6 +4776,7 @@ void interpreter_ex (struct in_command *cmd) {
     #else
     cmd->cb = command->default_cb;    
     #endif
+    cmd->refcnt ++;
     command->fun (command, 12, args, cmd);
   }
   
@@ -4268,7 +4793,7 @@ void interpreter (char *line) {
   memset (cmd, 0, sizeof (struct in_command));
   cmd->ev = NULL;
   cmd->line = strdup (line);
-  cmd->chat_mode_chat = cur_chat_mode_chat;
+  cmd->chat_mode_chat_id = cur_chat_mode_chat_id;
   cmd->refcnt = 1;
   in_readline = 1;
   interpreter_ex (cmd);
@@ -4663,100 +5188,100 @@ void print_service_message (struct in_ev *ev, struct tdl_message *M) {
 tgl_peer_id_t last_from_user_id;
 tgl_peer_id_t last_to_id;
 
-void print_user_status (struct in_ev *ev, struct tdl_user_status *S) {
-  switch (S->type) {
-  case tdl_user_status_empty:
+void print_user_status (struct in_ev *ev, struct TdUserStatus *status) {
+  switch (status->ID) {
+  case CODE_UserStatusEmpty:
     mprintf (ev, "offline");
     break;
-  case tdl_user_status_online:
+  case CODE_UserStatusOnline:
     mprintf (ev, "online");
     break;
-  case tdl_user_status_offline:
+  case CODE_UserStatusOffline:
     mprintf (ev, "offline (was online at ");
-    print_date (ev, S->when);
+    print_date (ev, ((struct TdUserStatusOffline *)status)->was_online_);
     mprintf (ev, ")");
     break;
-  case tdl_user_status_recently:
+  case CODE_UserStatusRecently:
     mprintf (ev, "recently");
     break;
-  case tdl_user_status_last_week:
+  case CODE_UserStatusLastWeek:
     mprintf (ev, "last week");
     break;
-  case tdl_user_status_last_month:
+  case CODE_UserStatusLastMonth:
     mprintf (ev, "last month");
     break;
   }
 }
 
-void print_user_name (struct in_ev *ev, struct tdl_user *U, int id) { 
-  if (U && U->my_link == tdl_user_link_state_contact) {
+void print_user_name (struct in_ev *ev, struct TdUser *U, int id) { 
+  if (U && U->my_link_->ID == CODE_LinkStateContact) {
     mpush_color (ev, COLOR_REDB);
   } else {
     mpush_color (ev, COLOR_RED);
   }
 
-  if (U && (U->first_name || U->last_name)) {
-    if (U->first_name) {
-      if (U->last_name) {
-        mprintf (ev, "%s %s", U->first_name, U->last_name);
+  if (U && (U->first_name_ || U->last_name_)) {
+    if (U->first_name_) {
+      if (U->last_name_) {
+        mprintf (ev, "%s %s", U->first_name_, U->last_name_);
       } else {
-        mprintf (ev, "%s", U->first_name);
+        mprintf (ev, "%s", U->first_name_);
       }
     } else {
-      mprintf (ev, "%s", U->last_name);
+      mprintf (ev, "%s", U->last_name_);
     }
   } else {
-    mprintf (ev, "user#%d", id);
+    mprintf (ev, "user#%d", U ? U->id_ : id);
   }
   
   mpop_color (ev);
 }
 
-void print_chat_name (struct in_ev *ev, struct tdl_chat_info *C, long long id) {
+void print_chat_name (struct in_ev *ev, struct TdChat *C, long long id) {
   if (!C) {
     mpush_color (ev, COLOR_RED);
-    mprintf (ev, "unknown#%lld", id);
+    mprintf (ev, "chat#id%lld", id);
     mpop_color (ev);
   } else {   
-    switch (C->chat->type) {
-      case tdl_chat_type_user:
-        print_user_name (ev, &C->chat->user, C->chat->user.id);
+    switch (C->type_->ID) {
+      case CODE_PrivateChatInfo:
+        print_user_name (ev, ((struct TdPrivateChatInfo *)C->type_)->user_, 0);
         return;
-      case tdl_chat_type_group:
+      case CODE_GroupChatInfo:
         mpush_color (ev, COLOR_MAGENTA);
-        mprintf (ev, "%s", C->title);
+        mprintf (ev, "%s", C->title_);
         mpop_color (ev);
         break;
-      case tdl_chat_type_channel:
-        if (C->chat->channel.is_supergroup) {
+      case CODE_ChannelChatInfo:
+        if (((struct TdChannelChatInfo *)C->type_)->channel_->is_supergroup_) {
           mpush_color (ev, COLOR_MAGENTA);
         } else {
           mpush_color (ev, COLOR_CYAN);
         }
-        mprintf (ev, "%s", C->title);
+        mprintf (ev, "%s", C->title_);
         mpop_color (ev);
         break;
-      case tdl_chat_type_secret_chat:
+      case CODE_SecretChatInfo:
         mpush_color (ev, COLOR_LCYAN);
-        mprintf (ev, "%s", C->title);
+        mprintf (ev, "%s", C->title_);
         mpop_color (ev);
         break;
     }
   }
 }
 
-void print_animation (struct in_ev *ev, struct tdl_animation *animation) {
-  mprintf (ev, "[animation %d", animation->file->id);
-  if (animation->file_name) {
-    mprintf (ev, " name=%s", animation->file_name);
+void print_animation (struct in_ev *ev, struct TdAnimation *animation) {
+  mprintf (ev, "[animation %d", animation->animation_->id_);
+  if (animation->file_name_) {
+    mprintf (ev, " name=%s", animation->file_name_);
   }
-  if (animation->mime_type) {
-    mprintf (ev, " type=%s", animation->mime_type);
+  if (animation->mime_type_) {
+    mprintf (ev, " type=%s", animation->mime_type_);
   }
-  if (animation->width && animation->height) {
-    mprintf (ev, " size=%dx%d", animation->width, animation->height);
+  if (animation->width_ && animation->height_) {
+    mprintf (ev, " size=%dx%d", animation->width_, animation->height_);
   }
-  int size = animation->file->size;
+  int size = animation->animation_->size_;
 
   mprintf (ev, " size=");
   if (size < (1 << 10)) {
@@ -4772,21 +5297,21 @@ void print_animation (struct in_ev *ev, struct tdl_animation *animation) {
   mprintf (ev, "]");
 }
 
-void print_audio (struct in_ev *ev, struct tdl_audio *audio) {
-  mprintf (ev, "[audio %d", audio->file->id);
-  if (audio->file_name) {
-    mprintf (ev, " name=%s", audio->file_name);
+void print_audio (struct in_ev *ev, struct TdAudio *audio) {
+  mprintf (ev, "[audio %d", audio->audio_->id_);
+  if (audio->file_name_) {
+    mprintf (ev, " name=%s", audio->file_name_);
   }
-  if (audio->mime_type) {
-    mprintf (ev, " type=%s", audio->mime_type);
+  if (audio->mime_type_) {
+    mprintf (ev, " type=%s", audio->mime_type_);
   }
-  if (audio->title) {
-    mprintf (ev, " title=%s", audio->title);
+  if (audio->title_) {
+    mprintf (ev, " title=%s", audio->title_);
   }
-  if (audio->performer) {
-    mprintf (ev, " artist=%s", audio->performer);
+  if (audio->performer_) {
+    mprintf (ev, " artist=%s", audio->performer_);
   }
-  int size = audio->file->size;
+  int size = audio->audio_->size_;
 
   mprintf (ev, " size=");
   if (size < (1 << 10)) {
@@ -4802,15 +5327,15 @@ void print_audio (struct in_ev *ev, struct tdl_audio *audio) {
   mprintf (ev, "]");
 }
 
-void print_document (struct in_ev *ev, struct tdl_document *document) {
-  mprintf (ev, "[document %d", document->file->id);
-  if (document->file_name) {     
-    mprintf (ev, " name=%s", document->file_name);
+void print_document (struct in_ev *ev, struct TdDocument *document) {
+  mprintf (ev, "[document %d", document->document_->id_);
+  if (document->file_name_) {     
+    mprintf (ev, " name=%s", document->file_name_);
   }
-  if (document->mime_type) {
-    mprintf (ev, " type=%s", document->mime_type);
+  if (document->mime_type_) {
+    mprintf (ev, " type=%s", document->mime_type_);
   }
-  int size = document->file->size;
+  int size = document->document_->size_;
 
   mprintf (ev, " size=");
   if (size < (1 << 10)) {
@@ -4826,48 +5351,33 @@ void print_document (struct in_ev *ev, struct tdl_document *document) {
   mprintf (ev, "]");
 }
 
-void print_photo (struct in_ev *ev, struct tdl_photo *photo) {
+void print_photo (struct in_ev *ev, struct TdPhoto *photo) {
   mprintf (ev, "[photo");
-  if (photo->sizes_cnt > 0) {
-    struct tdl_photo_size *s = photo->sizes[photo->sizes_cnt - 1];
-
+  if (photo->photos_->len > 0) {
     int j;
-    for (j = 0; j < photo->sizes_cnt; j++) {
-      struct tdl_photo_size *t = photo->sizes[j];
-      if (t->width != 0 || t->height != 0) {
-        mprintf (ev, " [photo_size %d size=%dx%d]", t->file->id, t->width, t->height);
+    for (j = 0; j < photo->photos_->len; j++) {
+      struct TdPhotoSize *t = photo->photos_->data[j];
+      if (t->width_ != 0 || t->height_ != 0) {
+        mprintf (ev, " [photo_size %d size=%dx%d]", t->photo_->id_, t->width_, t->height_);
       }
     }
-
-    int size = s->file->size;
-
-    mprintf (ev, " size=");
-    if (size < (1 << 10)) {
-      mprintf (ev, "%dB", size);
-    } else if (size < (1 << 20)) {
-      mprintf (ev, "%dKiB", size >> 10);
-    } else if (size < (1 << 30)) {
-      mprintf (ev, "%dMiB", size >> 20);
-    } else {
-      mprintf (ev, "%dGiB", size >> 30);
-    }
   }
 
   mprintf (ev, "]");
 }
 
-void print_sticker (struct in_ev *ev, struct tdl_sticker *sticker) {
-  mprintf (ev, "[sticker %d", sticker->file->id);
-  if (sticker->emoji) {
-    mprintf (ev, " emoji=%s", sticker->emoji);
+void print_sticker (struct in_ev *ev, struct TdSticker *sticker) {
+  mprintf (ev, "[sticker %d", sticker->sticker_->id_);
+  if (sticker->emoji_) {
+    mprintf (ev, " emoji=%s", sticker->emoji_);
   }
-  mprintf (ev, " set_id=%lld", sticker->set_id);
-  mprintf (ev, " rating=%.3lf", sticker->rating);
-  if (sticker->width && sticker->height) {
-    mprintf (ev, " size=%dx%d", sticker->width, sticker->height);
+  mprintf (ev, " set_id=%lld", sticker->set_id_);
+  mprintf (ev, " rating=%.3lf", sticker->rating_);
+  if (sticker->width_ && sticker->height_) {
+    mprintf (ev, " size=%dx%d", sticker->width_, sticker->height_);
   }
 
-  int size = sticker->file->size;
+  int size = sticker->sticker_->size_;
 
   mprintf (ev, " size=");
   if (size < (1 << 10)) {
@@ -4883,21 +5393,21 @@ void print_sticker (struct in_ev *ev, struct tdl_sticker *sticker) {
   mprintf (ev, "]");
 }
 
-void print_video (struct in_ev *ev, struct tdl_video *video) {
-  mprintf (ev, "[video %d", video->file->id);
-  if (video->file_name) {     
-    mprintf (ev, " name=%s", video->file_name);
+void print_video (struct in_ev *ev, struct TdVideo *video) {
+  mprintf (ev, "[video %d", video->video_->id_);
+  if (video->file_name_) {     
+    mprintf (ev, " name=%s", video->file_name_);
   }
-  if (video->mime_type) {
-    mprintf (ev, " type=%s", video->mime_type);
+  if (video->mime_type_) {
+    mprintf (ev, " type=%s", video->mime_type_);
   }
-  if (video->height && video->width) {
-    mprintf (ev, " size=%dx%d", video->width, video->height);
+  if (video->height_ && video->width_) {
+    mprintf (ev, " size=%dx%d", video->width_, video->height_);
   }
-  if (video->duration) {
-    mprintf (ev, " duration=%d", video->duration);
+  if (video->duration_) {
+    mprintf (ev, " duration=%d", video->duration_);
   }
-  int size = video->file->size;
+  int size = video->video_->size_;
 
   mprintf (ev, " size=");
   if (size < (1 << 10)) {
@@ -4913,18 +5423,15 @@ void print_video (struct in_ev *ev, struct tdl_video *video) {
   mprintf (ev, "]");
 }
 
-void print_voice (struct in_ev *ev, struct tdl_voice *voice) {
-  mprintf (ev, "[voice %d", voice->file->id);
-  if (voice->file_name) {     
-    mprintf (ev, " name=%s", voice->file_name);
+void print_voice (struct in_ev *ev, struct TdVoice *voice) {
+  mprintf (ev, "[voice %d", voice->voice_->id_);
+  if (voice->mime_type_) {
+    mprintf (ev, " type=%s", voice->mime_type_);
   }
-  if (voice->mime_type) {
-    mprintf (ev, " type=%s", voice->mime_type);
+  if (voice->duration_) {
+    mprintf (ev, " duration=%d", voice->duration_);
   }
-  if (voice->duration) {
-    mprintf (ev, " duration=%d", voice->duration);
-  }
-  int size = voice->file->size;
+  int size = voice->voice_->size_;
 
   mprintf (ev, " size=");
   if (size < (1 << 10)) {
@@ -4940,263 +5447,310 @@ void print_voice (struct in_ev *ev, struct tdl_voice *voice) {
   mprintf (ev, "]");
 }
 
-void print_venue (struct in_ev *ev, struct tdl_message_content_venue *C) {
-  mprintf (ev, "[venue https://maps.google.com/?q=%.6lf,%.6lf", C->latitude, C->longitude);
-  if (C->title) {
-    mprintf (ev, "title=%s", C->title);
+void print_location (struct in_ev *ev, struct TdLocation *C) {
+  mprintf (ev, "[location https://maps.google.com/?q=%.6lf,%.6lf", C->latitude_, C->longitude_);
+}
+
+void print_venue (struct in_ev *ev, struct TdVenue *C) {
+  mprintf (ev, "[venue https://maps.google.com/?q=%.6lf,%.6lf", C->location_->latitude_, C->location_->longitude_);
+  if (C->title_) {
+    mprintf (ev, "title=%s", C->title_);
   }
-  if (C->address) {
-    mprintf (ev, "address=%s", C->address);
+  if (C->address_) {
+    mprintf (ev, "address=%s", C->address_);
   }
   mprintf (ev, "]");
 }
 
-void print_contact (struct in_ev *ev, struct tdl_message_content_contact *C) {
-  mprintf (ev, "[contact %s", C->phone);
-  if (C->first_name) {
-    mprintf (ev, " %s", C->first_name);
+void print_contact (struct in_ev *ev, struct TdContact *C) {
+  mprintf (ev, "[contact %s", C->phone_number_);
+  if (C->first_name_) {
+    mprintf (ev, " %s", C->first_name_);
   }
-  if (C->last_name) {
-    mprintf (ev, " %s", C->last_name);
+  if (C->last_name_) {
+    mprintf (ev, " %s", C->last_name_);
   }
-  if (C->user_id) {
+  /*if (C->user_id) {
     struct tdl_user *U = tdlib_instant_get_user (TLS, C->user_id);
     if (U) {
       mprintf (ev, " ");
       print_user_name (ev, U, U->id);
     }
-  }
+  }*/
   mprintf (ev, "]");
 }
 
-void print_media (struct in_ev *ev, struct tdl_message_content_media *C) {
-  union tdl_message_media *M = C->media;
-  assert (M);
-  if (C->caption) {
-    mprintf (ev, "%s ", C->caption);
+void print_message_animation (struct in_ev *ev, struct TdMessageAnimation *animation) {
+  if (animation->caption_) {
+    mprintf ("%s ", animation->caption_);
   }
-  switch (M->type) {
-  case tdl_media_animation:
-    print_animation (ev, &M->animation);
-    break;
-  case tdl_media_audio:
-    print_audio (ev, &M->audio);
-    break;
-  case tdl_media_document:
-    print_document (ev, &M->document);
-    break;
-  case tdl_media_sticker:
-    print_sticker (ev, &M->sticker);
-    break;
-  case tdl_media_photo:
-    print_photo (ev, &M->photo);
-    break;
-  case tdl_media_video:
-    print_video (ev, &M->video);
-    break;
-  case tdl_media_voice:
-    print_voice (ev, &M->voice);
-    break;
+  print_animation (ev, animation->animation_);
+}
+
+void print_message_audio (struct in_ev *ev, struct TdMessageAudio *audio) {
+  if (audio->caption_) {
+    mprintf ("%s ", audio->caption_);
+  }
+  print_audio (ev, audio->audio_);
+}
+
+void print_message_document (struct in_ev *ev, struct TdMessageDocument *document) {
+  if (document->caption_) {
+    mprintf ("%s ", document->caption_);
+  }
+  print_document (ev, document->document_);
+}
+
+void print_message_photo (struct in_ev *ev, struct TdMessagePhoto *photo) {
+  if (photo->caption_) {
+    mprintf ("%s ", photo->caption_);
+  }
+  print_photo (ev, photo->photo_);
+}
+
+void print_message_sticker (struct in_ev *ev, struct TdMessageSticker *sticker) {
+  print_sticker (ev, sticker->sticker_);
+}
+
+void print_message_video (struct in_ev *ev, struct TdMessageVideo *video) {
+  if (video->caption_) {
+    mprintf ("%s ", video->caption_);
+  }
+  print_video (ev, video->video_);
+}
+
+void print_message_voice (struct in_ev *ev, struct TdMessageVoice *voice) {
+  if (voice->caption_) {
+    mprintf ("%s ", voice->caption_);
+  }
+  print_voice (ev, voice->voice_);
+}
+
+void print_message_location (struct in_ev *ev, struct TdMessageLocation *location) {
+  print_location (ev, location->location_);
+}
+
+void print_message_venue (struct in_ev *ev, struct TdMessageVenue *venue) {
+  print_venue (ev, venue->venue_);
+}
+
+void print_message_contact (struct in_ev *ev, struct TdMessageContact *contact) {
+  print_contact (ev, contact->contact_);
+}
+
+void print_message_text (struct in_ev *ev, struct TdMessageText *text) {
+  mprintf (ev, "%s", text->text_);
+  if (text->web_page_) {
+      mprintf (ev, " [webpage %s: %s]", 
+        text->web_page_->title_,
+        text->web_page_->description_
+      );
   }
 }
 
-void print_members (struct in_ev *ev, int members_count, struct tdl_user **members) {
-  mprintf (ev, "%d users:", members_count);
+void print_members (struct in_ev *ev, struct TdVectorUser *members) {
+  mprintf (ev, "%d users:", members->len);
   int i;
-  for (i = 0; i < members_count; i++) {
+  for (i = 0; i < members->len; i++) {
     mprintf (ev, " ");
-    print_user_name (ev, members[i], members[i]->id);
+    print_user_name (ev, members->data[i], 0);
   }
 }
 
-void print_message_action (struct in_ev *ev, union tdl_message_action *action) {
-  mpush_color (ev, COLOR_YELLOW);
-  switch (action->action) {
-  case tdl_message_action_type_group_create:
-    mprintf (ev, "Created group '%s' ", action->group_create.title);
-    print_members (ev, action->group_create.members_cnt, 
-      action->group_create.members);
-    break;
-  case tdl_message_action_type_channel_create:
-    mprintf (ev, "Created channel %s", action->channel_create.title);
-    break;
-  case tdl_message_action_type_chat_change_title:
-    mprintf (ev, "renamed to %s", action->change_title.title);
-    break;
-  case tdl_message_action_type_chat_change_photo:
-    mprintf (ev, "changed photo");
-    break;
-  case tdl_message_action_type_chat_delete_photo:
-    mprintf (ev, "deleted photo");
-    break;
-  case tdl_message_action_type_chat_add_members:
-    mprintf (ev, "added ");
-    print_members (ev, action->add_members.members_cnt, 
-      action->add_members.members);
-    break;
-  case tdl_message_action_type_chat_join_by_link:
-    {
-      mprintf (ev, "joined by link");
-      struct tdl_user *U = tdlib_instant_get_user (TLS, action->join_by_link.inviter_user_id);
-      if (U) {
-        mprintf (ev, " by ");
-        print_user_name (ev, U, U->id);
-      }
-    }
-    break;
-  case tdl_message_action_type_chat_delete_member:
-    {
-      print_user_name (ev, action->delete_member.user, action->delete_member.user->id);
-      mprintf (ev, " deleted");
-    }
-    break;
-  case tdl_message_action_type_chat_migrate_to:
-    {
-      mprintf (ev, " migrated to channel");
-    }
-    break;
-  case tdl_message_action_type_chat_migrate_from:
-    {
-      mprintf (ev, " migrated from group");
-    }
-    break;
-  case tdl_message_action_type_pin_message:
-    {
-      mprintf (ev, " pinned message");
-    }
-    break;
-  }
-  mpop_color (ev);
+void print_message_group_chat_create (struct in_ev *ev, struct TdMessageGroupChatCreate *act) {
+  mprintf (ev, "Created group '%s' ", act->title_);
+  print_members (ev, act->members_); 
 }
 
-void print_message_id (struct in_ev *ev, struct tdl_chat_info *C, int id) {
-  if (permanent_msg_id_mode) {
-    /*int s[3];
-    s[0] = C->chat->type;
-    s[1] = C->chat->id;
-    s[2] = id;*/
-    switch (C->chat->type) {
-    case tdl_chat_type_user:
-      mprintf (ev, "user#id%d@%d ", C->chat->user.id, id);
-      break;
-    case tdl_chat_type_group:
-      mprintf (ev, "group#id%d@%d ", C->chat->group.id, id);
-      break;
-    case tdl_chat_type_channel:
-      mprintf (ev, "channel#id%d@%d ", C->chat->channel.id, id);
-      break;
-    case tdl_chat_type_secret_chat:
-      mprintf (ev, "secret_chat#id%d@%d ", C->chat->secret_chat.id, id);
-      break;
+void print_message_channel_chat_create (struct in_ev *ev, struct TdMessageChannelChatCreate *act) {
+  mprintf (ev, "Created channel '%s' ", act->title_);
+}
+
+void print_message_chat_change_title (struct in_ev *ev, struct TdMessageChatChangeTitle *act) {
+  mprintf (ev, "renamed to '%s'", act->title_);
+}
+
+void print_message_chat_change_photo (struct in_ev *ev, struct TdMessageChatChangePhoto *act) {
+  mprintf (ev, "changed photo to ");
+  print_photo (ev, act->photo_);
+}
+
+void print_message_chat_delete_photo (struct in_ev *ev, struct TdMessageChatDeletePhoto *act) {
+  mprintf (ev, "deleted photo");
+}
+
+void print_message_chat_add_members (struct in_ev *ev, struct TdMessageChatAddMembers *act) {
+  mprintf (ev, "added members ");
+  print_members (ev, act->members_);
+}
+
+void print_message_chat_join_by_link (struct in_ev *ev, struct TdMessageChatJoinByLink *act) {
+  mprintf (ev, "joined by link");
+}
+
+void print_message_chat_delete_member (struct in_ev *ev, struct TdMessageChatDeleteMember *act) {
+  mprintf (ev, "kicked ");
+  print_user_name (ev, act->user_, 0);
+}
+
+void print_message_chat_migrate_to (struct in_ev *ev, struct TdMessageChatMigrateTo *act) {
+  mprintf (ev, "migrated to channel");
+}
+
+void print_message_chat_migrate_from (struct in_ev *ev, struct TdMessageChatMigrateFrom *act) {
+  mprintf (ev, "migrated from group");
+}
+
+void print_message_pin_message (struct in_ev *ev, struct TdMessagePinMessage *act) {
+  mprintf (ev, "pinned message %d", act->message_id_);
+}
+
+void print_message_game_score (struct in_ev *ev, struct TdMessageGameScore *act) {
+  mprintf (ev, "scored %d points in game %d (message %d)", act->score_, act->game_id_, act->game_message_id_);
+}
+
+void print_message_unsupported (struct in_ev *ev, struct TdMessageUnsupported *act) {
+  mprintf (ev, "[unsupported]");
+}
+
+void print_message_content (struct in_ev *ev, struct TdMessageContent *content) {
+  switch (content->ID) {
+  case CODE_MessageAnimation:
+    return print_message_animation (ev, (void *)content);
+  case CODE_MessageAudio:
+    return print_message_audio (ev, (void *)content);
+  case CODE_MessageDocument:
+    return print_message_document (ev, (void *)content);
+  case CODE_MessagePhoto:
+    return print_message_photo (ev, (void *)content);
+  case CODE_MessageSticker:
+    return print_message_sticker (ev, (void *)content);
+  case CODE_MessageVideo:
+    return print_message_video (ev, (void *)content);
+  case CODE_MessageVoice:
+    return print_message_voice (ev, (void *)content);
+  case CODE_MessageLocation:
+    return print_message_location (ev, (void *)content);
+  case CODE_MessageVenue:
+    return print_message_venue (ev, (void *)content);
+  case CODE_MessageContact:
+    return print_message_contact (ev, (void *)content);
+  case CODE_MessageText:
+    return print_message_text (ev, (void *)content);
+  case CODE_MessageGroupChatCreate:
+    return print_message_group_chat_create (ev, (void *)content);
+  case CODE_MessageChannelChatCreate:
+    return print_message_channel_chat_create (ev, (void *)content);
+  case CODE_MessageChatChangeTitle:
+    return print_message_chat_change_title (ev, (void *)content);
+  case CODE_MessageChatChangePhoto:
+    return print_message_chat_change_photo (ev, (void *)content);
+  case CODE_MessageChatAddMembers:
+    return print_message_chat_add_members (ev, (void *)content);
+  case CODE_MessageChatJoinByLink:
+    return print_message_chat_join_by_link (ev, (void *)content);
+  case CODE_MessageChatDeleteMember:
+    return print_message_chat_delete_member (ev, (void *)content);
+  case CODE_MessageChatMigrateTo:
+    return print_message_chat_migrate_to (ev, (void *)content);
+  case CODE_MessageChatMigrateFrom:
+    return print_message_chat_migrate_from (ev, (void *)content);
+  case CODE_MessagePinMessage:
+    return print_message_pin_message (ev, (void *)content);
+  case CODE_MessageGameScore:
+    return print_message_game_score (ev, (void *)content);
+  case CODE_MessageUnsupported:
+    return print_message_unsupported (ev, (void *)content);
+  default:
+    {
+      char *s = TdSerializeMessageContent (content);
+      logprintf ("Can not parse message media: %s\n", s);
+      free (s);
     }
-  } else {
-    mprintf (ev, "%d", convert_global_to_local (C->id, id)->local_id);
   }
 }
 
-void print_message (struct in_ev *ev, struct tdl_message *M) {
+
+void print_message_id (struct in_ev *ev, struct TdChat *C, int id) {
+  mprintf (ev, "%d", convert_global_to_local (C->id_, id)->local_id);
+}
+
+void print_message (struct in_ev *ev, struct TdMessage *M) {
   assert (M);
-  if (M->content->type == tdl_message_content_type_deleted) {
-    return;
-  }    
 
-  struct tdl_chat_info *C = tdlib_instant_get_chat (TLS, M->chat_id);
-  struct tdl_user *U = tdlib_instant_get_user (TLS, M->sender_user_id);
+  struct TdChat *C = get_chat (M->chat_id_);
+  struct TdUser *U = get_user (M->sender_user_id_);
 
-  if (M->sender_user_id == TLS->my_id) {
+  if (M->sender_user_id_ == my_id) {
     mpush_color (ev, COLOR_GREEN);
   } else {
     mpush_color (ev, COLOR_BLUE);
   }
-  print_date (ev, M->date);
+  print_date (ev, M->date_);
   mprintf (ev, " ");
-  print_message_id (ev, C, M->id);
+  print_message_id (ev, C, M->id_);
   mprintf (ev, " ");
 
-  print_chat_name (ev, C, M->chat_id);
+  print_chat_name (ev, C, M->chat_id_);
 
-  if (M->sender_user_id > 0 && (!C || C->chat->type != tdl_chat_type_user)) {
+  if (M->sender_user_id_ > 0 && (!C || C->type_->ID != CODE_PrivateChatInfo)) {
     mprintf (ev, " ");
-    print_user_name (ev, U, M->sender_user_id);
+    print_user_name (ev, U, M->sender_user_id_);
   }
 
-  if (M->sender_user_id == TLS->my_id) {
-    if (C && M->id <= C->last_read_outbox_message_id) {
+  if (M->sender_user_id_ == my_id) {
+    if (C && M->id_ <= C->last_read_outbox_message_id_) {
       mprintf (ev, " ««« "); 
     } else {
       mprintf (ev, " <<< "); 
     }
   } else {
-    if (C && M->id <= C->last_read_inbox_message_id) {
+    if (C && M->id_ <= C->last_read_inbox_message_id_) {
       mprintf (ev, " »»» ");
     } else {
       mprintf (ev, " >>> ");
     }
   }
 
-  if (M->forward_info) {
+  if (M->forward_info_) {
     mprintf (ev, "[fwd ");  
-    if (M->forward_info->chat_id) {
-      struct tdl_chat_info *C = tdlib_instant_get_chat (TLS, M->forward_info->chat_id);
-      print_chat_name (ev, C, M->forward_info->chat_id);
+    if (M->forward_info_->ID == CODE_MessageForwardedFromUser) {
+      struct TdMessageForwardedFromUser *FF = (void *)M->forward_info_;
+      
+      struct TdUser *U = get_user (FF->sender_user_id_);
+      print_user_name (ev, U, FF->sender_user_id_);
       mprintf (ev, " ");
-    }
-    if (M->forward_info->user_id) {
-      struct tdl_user *U = tdlib_instant_get_user (TLS, M->forward_info->user_id);
-      if (!U) {
-        mprintf (ev, "user#id%d", M->forward_info->user_id);
-      } else {
-        print_user_name (ev, U, U->id);
+      print_date (ev, FF->date_);
+    } else {
+      struct TdMessageForwardedPost *FF = (void *)M->forward_info_;
+      struct TdChat *C = get_chat (FF->chat_id_);
+      print_chat_name (ev, C, FF->chat_id_);
+      mprintf (ev, "  ");
+      if (FF->sender_user_id_) {
+        struct TdUser *U = get_user (FF->sender_user_id_);
+        print_user_name (ev, U, FF->sender_user_id_);
       }
       mprintf (ev, " ");
+      print_date (ev, FF->date_);
     }
 
-    print_date (ev, M->forward_info->date);
     mprintf (ev, "] ");
   }
   
-  if (M->reply_to_message_id) {
+  if (M->reply_to_message_id_) {
     mprintf (ev, "[reply ");
-    print_message_id (ev, C, M->reply_to_message_id);    
+    print_message_id (ev, C, M->reply_to_message_id_);    
     mprintf (ev, "] ");    
   }
 
-  if (M->via_bot_user_id) {
-    struct tdl_user *U = tdlib_instant_get_user (TLS, M->via_bot_user_id);
-    if (U && U->username) {
-      mprintf (ev, "[via @%s] ", U->username);
+  if (M->via_bot_user_id_) {
+    struct TdUser *U2 = get_user (M->via_bot_user_id_); 
+    if (U2 && U2->username_) {
+      mprintf (ev, "[via @%s] ", U2->username_);
     }
   }
 
-  switch (M->content->type) {
-  case tdl_message_content_type_text:
-    mprintf (ev, "%s", M->content->text.text);
-    if (M->content->text.web_page) {
-      mprintf (ev, " [webpage %s: %s]", 
-        M->content->text.web_page->title,
-        M->content->text.web_page->description
-      );
-    }  
-    break;
-  case tdl_message_content_type_media:
-    print_media (ev, &M->content->media);
-    break;
-  case tdl_message_content_type_venue:
-    print_venue (ev, &M->content->venue);
-    break;
-  case tdl_message_content_type_contact:
-    print_contact (ev, &M->content->contact);
-    break;
-  case tdl_message_content_type_deleted:
-    mprintf (ev, "[deleted]");
-    break;
-  case tdl_message_content_type_unsupported:
-    mprintf (ev, "[unsupported]");
-    break;
-  case tdl_message_content_type_action:
-    print_message_action (ev, &M->content->action);
-    break;
-  }
+  print_message_content (ev, M->content_);
   
   mpop_color (ev);
   assert (!color_stack_pos);

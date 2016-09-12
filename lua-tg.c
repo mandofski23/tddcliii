@@ -34,10 +34,10 @@
 #include "event-old.h"
 #endif
 lua_State *luaState;
+extern void *TLS;
 
 //#include "interface.h"
 //#include"auto/constants.h"
-#include "extension.h"
 
 #include <assert.h>
 
@@ -63,7 +63,11 @@ int ps_lua_pcall (lua_State *l, int a, int b, int c) {
 
 void tdcb_lua_pack_string (const char *s) {
   my_lua_checkstack (1);
-  lua_pushstring (luaState, s);
+  if (s) {
+    lua_pushstring (luaState, s);
+  } else {
+    lua_pushboolean (luaState, 0);
+  }
 }
 
 void tdcb_lua_pack_long (long long x) {
@@ -110,6 +114,17 @@ void tdcb_lua_new_arr_field (int id) {
   lua_insert (luaState, -2);
   lua_settable (luaState, -3);
 }
+
+struct TdStackStorerMethods tdcb_lua_storer_methods = {
+  .pack_string = tdcb_lua_pack_string,
+  .pack_long = tdcb_lua_pack_long,
+  .pack_double = tdcb_lua_pack_double,
+  .pack_bool = tdcb_lua_pack_bool,
+  .new_table = tdcb_lua_new_table,
+  .new_array = tdcb_lua_new_array,
+  .new_field = tdcb_lua_new_field,
+  .new_arr_field = tdcb_lua_new_arr_field,
+};
 
 int tdcb_lua_is_string (void) {
   return lua_isstring (luaState, -1);
@@ -166,37 +181,37 @@ void tdcb_lua_get_arr_field (int idx) {
   lua_gettable (luaState, -2);
 }
 
-struct tdcb_methods tdcb_lua_methods = {
-  .pack_string = tdcb_lua_pack_string,
-  .pack_long = tdcb_lua_pack_long,
-  .pack_double = tdcb_lua_pack_double,
-  .pack_bool = tdcb_lua_pack_bool,
-  .new_table = tdcb_lua_new_table,
-  .new_array = tdcb_lua_new_array,
-  .new_field = tdcb_lua_new_field,
-  .new_arr_field = tdcb_lua_new_arr_field,
-  .is_string = tdcb_lua_is_string,
-  .is_long = tdcb_lua_is_long,
-  .is_double = tdcb_lua_is_double,
-  .is_array = tdcb_lua_is_array,
-  .is_table = tdcb_lua_is_table,
-  .is_nil = tdcb_lua_is_nil,
+int tdcb_lua_get_arr_size (void) {
+  int pos = 0;
+  while (1) {
+    lua_pushinteger (luaState, pos);
+    lua_gettable (luaState, -2);
+    int b = lua_isnil (luaState, -1);
+    lua_pop (luaState, 1);
+    if (b) { break; }
+  }
+  return pos;
+}
+
+struct TdStackFetcherMethods tdcb_lua_fetcher_methods = {
   .get_string = tdcb_lua_get_string,
   .get_long = tdcb_lua_get_long,
   .get_double = tdcb_lua_get_double,
   .pop = tdcb_lua_pop,
   .get_field = tdcb_lua_get_field,
-  .get_arr_field = tdcb_lua_get_arr_field
+  .get_arr_field = tdcb_lua_get_arr_field,
+  .is_nil = tdcb_lua_is_nil,
+  .get_arr_size = tdcb_lua_get_arr_size
 };
 
-void lua_universal_cb (struct in_command *cmd, int success, struct res_arg *args) {
+void lua_universal_cb (struct in_command *cmd, struct TdNullaryObject *res) {
   struct lua_query_extra *cb = cmd->extra;
   lua_settop (luaState, 0);
 
   lua_rawgeti (luaState, LUA_REGISTRYINDEX, cb->func);
   lua_rawgeti (luaState, LUA_REGISTRYINDEX, cb->param);
   
-  tdcb_universal_pack_answer (&tdcb_lua_methods, cmd, success, args);
+  TdStackStorerNullaryObject (res, &tdcb_lua_storer_methods);
 
   assert (lua_gettop (luaState) == 3);
 
@@ -212,10 +227,11 @@ void lua_universal_cb (struct in_command *cmd, int success, struct res_arg *args
   free (cb);
 }
 
-void lua_update_cb (void *extra, struct update_description *D, struct res_arg args[]) {
+void lua_update_cb (void *extra, struct TdUpdate *res) {
   lua_settop (luaState, 0);
   lua_getglobal (luaState, "tdcli_update_callback");
-  tdcb_universal_pack_update (&tdcb_lua_methods, D, args);
+  
+  TdStackStorerUpdate (res, &tdcb_lua_storer_methods);
   
   int r = ps_lua_pcall (luaState, 1, 0, 0);
 
@@ -242,8 +258,12 @@ int lua_parse_function (lua_State *L) {
   cmd->cb = lua_universal_cb;
   cmd->extra = e;
 
-  
-  tdcb_run_command (&tdcb_lua_methods, cmd);
+  assert (lua_gettop (L) == 1);
+  struct TdFunction *T = TdStackFetcherFunction (&tdcb_lua_fetcher_methods);
+  assert (lua_gettop (L) == 1);
+  lua_pop (luaState, 1);
+
+  TdCClientSendCommand (TLS, T, tdcli_cb, cmd);
 
   lua_pushboolean (L, 1);
   return 1;

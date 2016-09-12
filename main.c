@@ -57,7 +57,6 @@
 
 #include "interface.h"
 #include "loop.h"
-#include "tdc/tdlib-c-bindings.h"
 #include "telegram.h"
 
 #define PROGNAME "telegram-cli"
@@ -73,16 +72,36 @@
   "# This is an empty config file\n" \
   "# Feel free to put something here\n"
 
+struct TdCClientParameters params = {
+  .is_test_dc = 0,
+  .api_id = TELEGRAM_CLI_API_ID,
+  .api_hash = TELEGRAM_CLI_API_HASH,
+  .language_code = "en",
+  .device_model = "PC",
+  .system_version = "Unix/??",
+  .app_version = TELEGRAM_CLI_VERSION,
+  .use_secret_chats = 0,
+  .database_directory = ".",
+  .files_directory = ".",
+  
+  .updates_handler = updates_handler,
+  .updates_arg = NULL,
+
+  .notify_need_work = wakeup 
+};
+
+
+
 int bot_mode;
 int verbosity;
 int msg_num_mode;
+int log_level;
+
 char *config_filename;
 char *profile;
 char *work_directory;
 char *lua_file;
 char *python_file;
-
-int log_level;
 
 int disable_colors;
 int readline_disabled;
@@ -100,7 +119,7 @@ int permanent_msg_id_mode;
 int permanent_peer_id_mode;
 char *home_directory;
 
-struct tdlib_state *TLS;
+void *TLS;
 
 /* {{{ TERMINAL */
 static struct termios term_in, term_out;
@@ -295,7 +314,7 @@ void parse_config (void) {
   strcpy (buf + l, "test");
   config_lookup_bool (&conf, buf, &test_mode);
   if (test_mode) {
-    tdlib_enable_test_mode (TLS);
+    params.is_test_dc = 1;
   }
   
   strcpy (buf + l, "log_level");
@@ -319,11 +338,11 @@ void parse_config (void) {
 
   char *data_directory = NULL;
   parse_config_val (&conf, &data_directory, "data_directory", "data", config_directory);
-  tdlib_set_data_directory (TLS, data_directory);
-  
   if (!disable_output) {
     printf ("I: data_directory = '%s'\n", data_directory);
   }
+  params.database_directory = strdup (data_directory);
+  params.files_directory = strdup (data_directory);
 
   if (!lua_file) {
     parse_config_val (&conf, &lua_file, "lua_script", 0, config_directory);
@@ -332,13 +351,6 @@ void parse_config (void) {
   
   if (!python_file) {
     parse_config_val (&conf, &python_file, "python_script", 0, config_directory);
-  }
- 
-  int pfs_enabled = 0;
-  strcpy (buf + l, "pfs_enabled");
-  config_lookup_bool (&conf, buf, &pfs_enabled);
-  if (pfs_enabled) {
-    tdlib_enable_pfs (TLS);
   }
   
   if (!mkdir (config_directory, CONFIG_DIRECTORY_MODE)) {
@@ -365,7 +377,8 @@ void parse_config (void) {
   char *config_directory = make_path (get_home_directory (), CONFIG_DIRECTORY);
   char *data_directory = make_path (config_directory, "data");
   
-  tdlib_set_data_directory (TLS, data_directory);
+  params.database_directory = strdup (data_directory);
+  params.files_directory = strdup (data_directory);
   
   if (!mkdir (config_directory, CONFIG_DIRECTORY_MODE)) {
     if (!disable_output) {
@@ -391,22 +404,11 @@ void usage (void) {
   printf ("%s Usage\n", PROGNAME);
     
   printf ("  --phone/-u                           specify username (would not be asked during authorization)\n");
-  printf ("  --rsa-key/-k                         specify location of public key (possible multiple entries)\n");
   printf ("  --verbosity/-v                       increase verbosity (0-ERROR 1-WARNIN 2-NOTICE 3+-DEBUG-levels)\n");
   printf ("  --enable-msg-id/-N                   message num mode\n");
   #ifdef HAVE_LIBCONFIG
   printf ("  --config/-c                          config file name\n");
   printf ("  --profile/-p                         use specified profile\n");
-  #else
-  #if 0
-  printf ("  --enable-binlog/-B                   enable binlog\n");
-  #endif
-  #endif
-  printf ("  --log-level/-l                       log level\n");
-  printf ("  --sync-from-start/-f                 during authorization fetch all messages since registration\n");
-  printf ("  --disable-auto-accept/-E             disable auto accept of encrypted chats\n");
-  #ifdef USE_LUA
-  printf ("  --lua-script/-s                      lua script file\n");
   #endif
   printf ("  --wait-dialog-list/-W                send dialog_list query and wait for answer before reading input\n");
   printf ("  --disable-colors/-C                  disable color output\n");
@@ -421,7 +423,6 @@ void usage (void) {
   printf ("  --udp-socket/-S <socket-name>        unix socket to create\n");
   printf ("  --exec/-e <commands>                 make commands end exit\n");
   printf ("  --disable-names/-I                   use user and chat IDs in updates instead of names\n");
-  printf ("  --enable-ipv6/-6                     use ipv6 (may be unstable)\n");
   printf ("  --help/-h                            prints this help\n");
   printf ("  --accept-any-tcp                     accepts tcp connections from any src (only loopback by default)\n");
   printf ("  --disable-link-preview               disables server-side previews to links\n");
@@ -538,21 +539,14 @@ int change_user_group () {
 char *unix_socket;
 
 void args_parse (int argc, char **argv) {
-  TLS = tdlib_state_alloc ();
-
   static struct option long_options[] = {
     {"verbosity", no_argument, 0, 'v'},
     {"enable-msg-id", no_argument, 0, 'N'},
 #ifdef HAVE_LIBCONFIG
     {"config", required_argument, 0, 'c'},
     {"profile", required_argument, 0, 'p'},
-#else
-    #if 0
-    {"enable-binlog", no_argument, 0, 'B'},
-    #endif
 #endif
     {"log-level", required_argument, 0, 'l'},
-    {"disable-auto-accept", no_argument, 0, 'E'},
 #ifdef USE_LUA
     {"lua-script", required_argument, 0, 's'},
 #endif
@@ -565,12 +559,10 @@ void args_parse (int argc, char **argv) {
     {"username", required_argument, 0, 'U'},
     {"groupname", required_argument, 0, 'G'},
     {"disable-output", no_argument, 0, 'D'},
-    {"reset-authorization", no_argument, 0, 'q'},
     {"tcp-port", required_argument, 0, 'P'},
     {"unix-socket", required_argument, 0, 'S'},
     {"exec", required_argument, 0, 'e'},
     {"disable-names", no_argument, 0, 'I'},
-    {"enable-ipv6", no_argument, 0, '6'},
     {"bot", optional_argument, 0, 'b'},
     {"help", no_argument, 0, 'h'},
     {"accept-any-tcp", no_argument, 0,  1001},
@@ -588,10 +580,6 @@ void args_parse (int argc, char **argv) {
   while ((opt = getopt_long (argc, argv, "u:hk:vNl:fEwWCRAdL:DU:G:qP:S:e:I6b"
 #ifdef HAVE_LIBCONFIG
   "c:p:"
-#else
-  #if 0
-  "B"
-  #endif
 #endif
 #ifdef USE_LUA
   "s:"
@@ -626,12 +614,6 @@ void args_parse (int argc, char **argv) {
       profile = optarg;
       assert (strlen (profile) <= 100);
       break;
-#else
-    #if 0
-    case 'B':
-      binlog_enabled = 1;
-      break;
-    #endif
 #endif
     case 'l':
       log_level = atoi (optarg);
@@ -690,9 +672,6 @@ void args_parse (int argc, char **argv) {
       break;
     case 'I':
       use_ids ++;
-      break;
-    case '6':
-      ipv6_enabled = 1;
       break;
     case 1002:
       disable_link_preview = 2;
@@ -821,7 +800,7 @@ int main (int argc, char **argv) {
   
   args_parse (argc, argv);
   
-  tdlib_set_logger_verbosity (verbosity);
+  TdCClientSetVerbosity (verbosity);
   
   change_user_group ();
 

@@ -11,20 +11,6 @@ struct tgl_peer_id {
   int peer_id;
 };
 
-struct telegram_cli_chat_extra {
-  int owner_type;
-  void *owner;
-
-  char *main_alias;
-  char *name_alias;
-  char *username_alias;
-
-  int aliases_cnt;
-  char **aliases;
-
-  int unread_count;
-};
-
 #pragma pack(pop)
 
 typedef struct tdl_message_id tdl_message_id_t;

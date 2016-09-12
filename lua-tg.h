@@ -24,5 +24,5 @@
 #include "interface.h"
 
 void lua_init (const char *file);
-void lua_update_cb (void *extra, struct update_description *D, struct res_arg args[]);
+//void lua_update_cb (void *extra, struct TdNullaryObject *);
 #endif

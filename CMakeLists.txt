@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 2.8)
 
 set (CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
 
-add_subdirectory("tdc")
+add_subdirectory("td/libtd/src/main/jni")
+include_directories ("td/libtd/src/main/jni")
 
 #find_package (libevent)
 find_package(LibConfig)
@@ -63,11 +64,10 @@ set (TDCLI_SOURCE
   loop.c
   lua-tg.c
   json-tg.c
-  extension.c
 )
 
 
 add_executable (telegram-cli ${TDCLI_SOURCE})
-target_link_libraries (telegram-cli tdlibc ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${READLINE_LIBRARY} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread )
+target_link_libraries (telegram-cli tdc tdclient ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${READLINE_LIBRARY} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread )
 install (TARGETS telegram-cli
     RUNTIME DESTINATION bin)

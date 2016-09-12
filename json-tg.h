@@ -5,9 +5,9 @@
 
 #include "interface.h"
 
-void json_universal_cb (struct in_command *cmd, int success, struct res_arg *args);
+void json_universal_cb (struct in_command *cmd, struct TdNullaryObject *res);
 void json_interpreter_ex (struct in_command *cmd);
-void json_update_cb (void *extra, struct update_description *D, struct res_arg args[]);
+void json_update_cb (void *extra, struct TdUpdate *upd);
 
 #endif
 #endif

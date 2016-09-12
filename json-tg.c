@@ -1,7 +1,6 @@
 #ifdef USE_JSON
 
 #include <jansson.h>
-#include "tdc/tdlib-c-bindings.h"
 #include "json-tg.h"
 #include "interface.h"
 #include <assert.h>
@@ -9,8 +8,6 @@
 //format time:
 #include <time.h>
 #include <errno.h>
-
-#include "extension.h"
 
 extern struct tdlib_state *TLS;
 
@@ -132,7 +129,12 @@ void tdcb_json_get_arr_field (int idx) {
   stack[stack_pos ++] = a ? json_incref (a) : NULL;
 }
 
-struct tdcb_methods tdcb_json_methods = {
+int tdcb_json_get_arr_size (void) {
+  assert (stack_pos >= 1);
+  return (int)json_array_size (stack[stack_pos - 1]);
+}
+
+struct TdStackStorerMethods tdcb_json_storer_methods = {
   .pack_string = tdcb_json_pack_string,
   .pack_long = tdcb_json_pack_long,
   .pack_double = tdcb_json_pack_double,
@@ -141,20 +143,18 @@ struct tdcb_methods tdcb_json_methods = {
   .new_array = tdcb_json_new_array,
   .new_field = tdcb_json_new_field,
   .new_arr_field = tdcb_json_new_arr_field,
-  .is_string = tdcb_json_is_string,
-  .is_long = tdcb_json_is_long,
-  .is_double = tdcb_json_is_double,
-  .is_array = tdcb_json_is_array,
-  .is_table = tdcb_json_is_table,
+};
+
+struct TdStackFetcherMethods tdcb_json_fetcher_methods = {
   .is_nil = tdcb_json_is_nil,
   .get_string = tdcb_json_get_string,
   .get_long = tdcb_json_get_long,
   .get_double = tdcb_json_get_double,
   .pop = tdcb_json_pop,
   .get_field = tdcb_json_get_field,
-  .get_arr_field = tdcb_json_get_arr_field
+  .get_arr_field = tdcb_json_get_arr_field,
+  .get_arr_size = tdcb_json_get_arr_size
 };
-
 
 void socket_answer_start (void);
 void socket_answer_add_printf (const char *format, ...) __attribute__ ((format (printf, 1, 2)));
@@ -179,10 +179,10 @@ void socket_answer_end (struct in_ev *ev);
   if (!ev) { pop_color (__VA_ARGS__); }
 
 
-void json_universal_cb (struct in_command *cmd, int success, struct res_arg *args) {
+void json_universal_cb (struct in_command *cmd, struct TdNullaryObject *res) {
   assert (stack_pos == 0);
-  
-  tdcb_universal_pack_answer (&tdcb_json_methods, cmd, success, args);
+
+  TdStackStorerNullaryObject (res, &tdcb_json_storer_methods);
   
   assert (stack_pos == 1);
   
@@ -195,10 +195,10 @@ void json_universal_cb (struct in_command *cmd, int success, struct res_arg *arg
   mprint_end (cmd->ev);
 }
 
-void json_update_cb (void *extra, struct update_description *D, struct res_arg args[]) {
+void json_update_cb (void *extra, struct TdUpdate *res) {
   assert (stack_pos == 0);
   
-  tdcb_universal_pack_update (&tdcb_json_methods, D, args);
+  TdStackStorerUpdate (res, &tdcb_json_storer_methods);
   
   assert (stack_pos == 1);
   
@@ -229,8 +229,11 @@ void json_interpreter_ex (struct in_command *cmd) {
   assert (!stack_pos);
   stack[stack_pos ++] = F;
   assert (stack_pos == 1);
-  tdcb_run_command (&tdcb_json_methods, cmd);
+  struct TdFunction *T = TdStackFetcherFunction (&tdcb_json_fetcher_methods);
+  assert (stack_pos == 1);
   json_decref (stack[0]);
   stack_pos --;
+
+  TdCClientSendCommand (TLS, T, tdcli_cb, cmd);
 }
 #endif

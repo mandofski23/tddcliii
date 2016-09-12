@@ -57,8 +57,6 @@
 #include "lua-tg.h"
 #endif
 
-#include "tdc/tdlib-c-bindings.h"
-
 #include <pthread.h>
 
 struct event_base *ev_base; 
@@ -88,7 +86,7 @@ static int delete_stdin_event;
 extern volatile int sigterm_cnt;
 
 extern char *start_command;
-extern struct tdlib_state *TLS;
+extern void *TLS;
 extern int ipv6_enabled;
 
 struct event *term_ev = 0;
@@ -96,7 +94,7 @@ int read_one_string;
 #define MAX_ONE_STRING_LEN 511
 char one_string[MAX_ONE_STRING_LEN + 1];
 int one_string_len;
-void (*one_string_cb)(struct tdlib_state *TLS, const char *string, void *arg);
+void (*one_string_cb)(void *TLS, const char *string, void *arg);
 
 void *one_string_cb_arg;
 char *one_string_prompt;
@@ -118,7 +116,7 @@ static void one_string_read_end (void) {
   one_string_cb (TLS, one_string, one_string_cb_arg);
 }
 
-void do_get_string (struct tdlib_state *TLS, char *prompt, int flags) {
+void do_get_string (void *TLS, char *prompt, int flags) {
   deactivate_readline ();
   one_string_prompt = strdup (prompt);
   printf ("%s", one_string_prompt);
@@ -226,7 +224,7 @@ void net_loop (void) {
   
     //tdlib_do_run_scheduler (0.001);
     if (need_update) {
-      tdlib_get_updates (TLS);
+      TdCClientWork (TLS);
     
       update_prompt ();
       //need_update = 0;
@@ -263,7 +261,7 @@ static void read_incoming (struct bufferevent *bev, void *_arg) {
           cmd->ev = ev;
           ev->refcnt ++;
           cmd->line = strdup (ev->in_buf);
-          cmd->chat_mode_chat = NULL;
+          cmd->chat_mode_chat_id = 0;
           cmd->refcnt = 1;
 
           interpreter_ex (cmd);          
@@ -321,7 +319,7 @@ static void accept_incoming (evutil_socket_t efd, short what, void *arg) {
   bufferevent_enable (bev, EV_READ | EV_WRITE);
 }
 
-void on_started (struct tdlib_state *TLS) {
+void on_started (void *TLS) {
   if (start_command) {
     safe_quit = 1;
     while (*start_command) {
@@ -337,7 +335,7 @@ void on_started (struct tdlib_state *TLS) {
       struct in_command *cmd = malloc (sizeof (*cmd));
       cmd->refcnt = 1;
       cmd->line = strdup (start);
-      cmd->chat_mode_chat = NULL;
+      cmd->chat_mode_chat_id = 0;
       cmd->ev = NULL;
       interpreter_ex (cmd);
       in_command_decref (cmd);
@@ -346,18 +344,18 @@ void on_started (struct tdlib_state *TLS) {
 }
 
 char *hint;
-enum tdl_auth_state_type auth_state;
+int auth_state;
 
-void on_got_auth_state (struct tdlib_state *TLS, void *extra, int success, union tdl_auth_state *state);
+void on_got_auth_state (void *TLS, void *extra, struct TdNullaryObject *res);
 
-void on_got_password (struct tdlib_state *TLS, const char *password, void *extra) {
-  tdlib_check_auth_password (TLS, on_got_auth_state, extra, password);
+void on_got_password (void *TLS, const char *password, void *extra) {
+  TdCClientSendCommand (TLS, (void *)TdCreateObjectCheckAuthPassword ((char *)password), on_got_auth_state, extra);
 }
 
-void on_got_code (struct tdlib_state *TLS, const char *code, void *extra) {
+void on_got_code (void *TLS, const char *code, void *extra) {
   void **arr = extra;
   
-  tdlib_check_auth_code (TLS, on_got_auth_state, arr[0], code, arr[1], arr[2]);
+  TdCClientSendCommand (TLS, (void *)TdCreateObjectCheckAuthCode ((char *)code, arr[1], arr[2]), on_got_auth_state, arr[0]);
 
   if (arr[1]) {
     free (arr[1]);
@@ -368,7 +366,7 @@ void on_got_code (struct tdlib_state *TLS, const char *code, void *extra) {
   free (arr);
 }
 
-void on_got_last_name (struct tdlib_state *TLS, const char *last_name, void *extra) {
+void on_got_last_name (void *TLS, const char *last_name, void *extra) {
   void **arr = extra;
   
   arr[2] = strdup (last_name);
@@ -378,7 +376,7 @@ void on_got_last_name (struct tdlib_state *TLS, const char *last_name, void *ext
   do_get_string (TLS, "code: ", 0);
 }
 
-void on_got_first_name (struct tdlib_state *TLS, const char *first_name, void *extra) {
+void on_got_first_name (void *TLS, const char *first_name, void *extra) {
   void **arr = extra;
   arr[1] = strdup (first_name);
     
@@ -388,60 +386,68 @@ void on_got_first_name (struct tdlib_state *TLS, const char *first_name, void *e
 }
 
 
-void on_got_phone (struct tdlib_state *TLS, const char *phone, void *extra) {
-  tdlib_set_auth_phone (TLS, on_got_auth_state, extra, phone, 0, 0);
+void on_got_phone (void *TLS, const char *phone, void *extra) {
+  TdCClientSendCommand (TLS, (void *)TdCreateObjectSetAuthPhoneNumber ((char *)phone, 0, 0), on_got_auth_state, extra);
 }
 
 void on_got_unknown_cb (evutil_socket_t fd, short what, void *arg) {
-  tdlib_get_auth_state (TLS, on_got_auth_state, arg);
+  TdCClientSendCommand (TLS, (void *)TdCreateObjectGetAuthState (), on_got_auth_state, arg);
 }
 
-void on_got_auth_state (struct tdlib_state *TLS, void *extra, int success, union tdl_auth_state *state) {
-  if (!success) {
-    logprintf ("Error %d: %s\n", TLS->error_code, TLS->error);
+void on_got_auth_state (void *TLS, void *extra, struct TdNullaryObject *res) {
+  if (res->ID == CODE_Error) {
+    struct TdError *error = (void *)res;
+    logprintf ("Error %d: %s\n", error->code_, error->message_);
   } else {
     if (hint) {
       free (hint);
       hint = NULL;
     }
-    auth_state = state->type;
-    if (state->type == tdl_auth_state_wait_password) {
-      hint = state->wait_password.hint ? strdup (state->wait_password.hint) : NULL;
+    auth_state = res->ID;
+    if (res->ID == CODE_AuthStateWaitPassword) {
+      struct TdAuthStateWaitPassword *w = (void *)res;
+      hint = w->hint_ ? strdup (w->hint_) : NULL;
     }
   }
 
 
   switch (auth_state) {
-  case tdl_auth_state_wait_phone_number:
+  case CODE_AuthStateWaitPhoneNumber:
     if (bot_mode) {
-      tdlib_check_auth_bot_token (TLS, on_got_auth_state, extra, bot_hash);
+      TdCClientSendCommand (TLS, (void *)TdCreateObjectCheckAuthBotToken (bot_hash), on_got_auth_state, extra);
     } else {
       one_string_cb_arg = extra;
       one_string_cb = on_got_phone;
       do_get_string (TLS, "phone: ", 0);
     }
     break;
-  case tdl_auth_state_wait_code:
-    if (state->wait_code.is_registered) {
-      void **arr = calloc (sizeof (void *), 3);
-      arr[0] = extra;
-      one_string_cb_arg = arr;
-      one_string_cb = on_got_code;
-      do_get_string (TLS, "code: ", 0);
-    } else {
-      void **arr = calloc (sizeof (void *), 3);
-      arr[0] = extra;
-      one_string_cb_arg = arr;
-      one_string_cb = on_got_first_name;
-      do_get_string (TLS, "first_name: ", 0);
+  case CODE_AuthStateWaitCode:
+    {
+      struct TdAuthStateWaitCode *w = (void *)res;
+      if (w->is_registered_) {
+        void **arr = calloc (sizeof (void *), 3);
+        arr[0] = extra;
+        one_string_cb_arg = arr;
+        one_string_cb = on_got_code;
+        do_get_string (TLS, "code: ", 0);
+      } else {
+        void **arr = calloc (sizeof (void *), 3);
+        arr[0] = extra;
+        one_string_cb_arg = arr;
+        one_string_cb = on_got_first_name;
+        do_get_string (TLS, "first_name: ", 0);
+      }
     }
     break;
-  case tdl_auth_state_wait_password:
+  case CODE_AuthStateWaitPassword:
     one_string_cb_arg = extra;
     one_string_cb = on_got_password;
     do_get_string (TLS, "password: ", 1);
     break;
-  case tdl_auth_state_unknown:
+  case CODE_AuthStateOk:
+  case CODE_AuthStateLoggingOut:
+    break;
+  default:
     {
       struct event *ev = evtimer_new (ev_base, on_got_unknown_cb, extra);
       struct timeval tv;
@@ -450,28 +456,23 @@ void on_got_auth_state (struct tdlib_state *TLS, void *extra, int success, union
       event_add (ev, &tv);
     }
     break;
-  case tdl_auth_state_ok:
-  case tdl_auth_state_logging_out:
-    break;
   }
 }
 
-void tgl_login (void) {
-  auth_state = tdl_auth_state_unknown;
-  tdlib_get_auth_state (TLS, on_got_auth_state, NULL);
+void tdcli_login (void) {
+  auth_state = 0;
+  TdCClientSendCommand (TLS, (void *)TdCreateObjectGetAuthState (), on_got_auth_state, NULL);
 }
 
-void wakeup (struct tdlib_state *TLS) {  
+void wakeup (void *TLS) {  
   int x = 0;
   write (write_pipe, &x, 4);
 }
 
+extern struct TdCClientParameters params;
+
 int loop (void) {
-  tgl_set_callback (TLS, &upd_cb);
-  struct event_base *ev = event_base_new ();
-  ev_base = ev;
-  tgl_register_app_id (TLS, TELEGRAM_CLI_APP_ID, TELEGRAM_CLI_APP_HASH); 
-  tgl_set_app_version (TLS, "Telegram-cli " TELEGRAM_CLI_VERSION);
+  ev_base = event_base_new ();
 
   int p[2];
   if (pipe (p) < 0) {
@@ -483,11 +484,6 @@ int loop (void) {
   
   struct event *pipe_ev = event_new (ev_base, read_pipe, EV_READ | EV_PERSIST, pipe_read_cb, 0);
   event_add (pipe_ev, 0);
-
-  /*if (disable_link_preview) {
-    tgl_disable_link_preview (TLS);
-  }*/
-  tdlib_do_start (TLS);
   
   if (sfd >= 0) {
     struct event *ev = event_new (ev_base, sfd, EV_READ | EV_PERSIST, accept_incoming, 0);
@@ -501,7 +497,10 @@ int loop (void) {
 
   set_interface_callbacks ();
 
-  tgl_login ();
+  TLS = TdCClientStart (&params);
+  assert (TLS);
+
+  tdcli_login ();
   net_loop ();
   return 0;
 }

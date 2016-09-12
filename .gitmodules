@@ -1,4 +1,3 @@
-[submodule "tdc"]
-	path = tdc
-	url = git@bitbucket.org:vysheng/tdc
-  ignore = dirty
+[submodule "td"]
+	path = td
+	url = git@bitbucket.org:drinkless/td

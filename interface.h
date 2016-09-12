@@ -21,7 +21,7 @@
 
 #include <stdlib.h>
 
-#include "tdc/tdlib-c-bindings.h"
+#include "td/telegram/td_c_client.h"
 #include "telegram-layout.h"
 
 union tdl_chat;
@@ -74,11 +74,11 @@ struct tdl_user;
 struct tdl_chat_info;
 struct tdl_message;
 struct in_ev;
-void print_message (struct in_ev *ev, struct tdl_message *M);
-void print_user_name (struct in_ev *ev, struct tdl_user *U, int id);
-void print_chat_name (struct in_ev *ev, struct tdl_chat_info *C, long long id);
-void print_channel_name (struct in_ev *ev, struct tdl_channel *C, int id);
-void print_user_status (struct in_ev *ev, struct tdl_user_status *S);
+void print_message (struct in_ev *ev, struct TdMessage *M);
+void print_user_name (struct in_ev *ev, struct TdUser *U, int id);
+void print_chat_name (struct in_ev *ev, struct TdChat *C, long long id);
+void print_channel_name (struct in_ev *ev, struct TdChannel *C, int id);
+void print_user_status (struct in_ev *ev, struct TdUserStatus *S);
 /*void print_chat_name (struct in_ev *ev, tgl_peer_id_t id, tgl_peer_t *C);
 void print_channel_name (struct in_ev *ev, tgl_peer_id_t id, tgl_peer_t *C);
 void print_user_name (struct in_ev *ev, tgl_peer_id_t id, tgl_peer_t *U);
@@ -103,10 +103,11 @@ struct in_command {
   struct in_ev *ev;
   int refcnt;
   long long query_id;
-  struct tdl_chat_info *chat_mode_chat;
+  long long chat_mode_chat_id;
+  //struct tdl_chat_info *chat_mode_chat;
   struct command *cmd;
   void *extra;
-  void (*cb)(struct in_command *, int success, struct res_arg *args);
+  void (*cb)(struct in_command *, struct TdNullaryObject *result);
 };
 void in_command_decref (struct in_command *cmd);
 
@@ -195,8 +196,11 @@ struct arg {
     long long num;
     double dval;
     tdl_message_id_t msg_id;
-    //tgl_peer_id_t peer_id;
-    struct tdl_chat_info *chat;
+    long long chat_id;
+    int user_id;
+    int channel_id;
+    int group_id;
+    int secret_chat_id;
 
     struct {
       int vec_len;
@@ -205,7 +209,15 @@ struct arg {
   };
 };
 
-typedef void (*tdlib_cb_t)(struct in_command *, int, struct res_arg *);
+enum tdcli_chat_type {
+  tdcli_any = 0,
+  tdcli_user = CODE_User,
+  tdcli_group = CODE_Group,
+  tdcli_channel = CODE_Channel,
+  tdcli_secret_chat = CODE_SecretChat
+};
+
+typedef void (*tdlib_cb_t)(struct in_command *, struct TdNullaryObject *result);
 struct command {
   char *name;
   struct command_argument_desc args[10];
@@ -217,16 +229,15 @@ struct command {
   long params[10];
 };
 
+struct tdcli_peer;
 struct chat_alias {
   char *name;
-  int type;
-  void *chat;
+  struct tdcli_peer *peer;
   struct chat_alias *next, *prev;
 };
 
 struct update_description {
-  struct result_argument_desc res_args[10];
-  void (*default_cb)(void *extra, struct update_description *D, struct res_arg args[10]);
+  void (*default_cb)(void *extra, struct TdUpdate *update);
   char *name;
 };
 
@@ -235,9 +246,16 @@ struct chat_alias *get_by_alias (const char *name);
 //char *print_permanent_peer_id (tgl_peer_id_t id);
 //tgl_peer_id_t parse_input_peer_id (const char *s, int l, int mask);
 //tdl_message_id_t parse_input_msg_id (const char *s, int l);
-void fail_interface (struct tdlib_state *TLS, struct in_command *cmd, int error_code, const char *format, ...) __attribute__ (( format (printf, 4, 5)));
+void fail_interface (void *TLS, struct in_command *cmd, int error_code, const char *format, ...) __attribute__ (( format (printf, 4, 5)));
 long long find_modifier (int arg_num, struct arg args[], const char *name, int type);
-struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void *, struct update_description *, struct res_arg []));
+struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void *, struct TdUpdate *));
+void tdcli_cb (void *instance, void *extra, struct TdNullaryObject *result);
 
+void updates_handler (void *instance, void *arg, struct TdUpdate *result);
+
+extern int bot_mode;
+extern int verbosity;
+extern int msg_num_mode;
+extern int log_level;
 #define NOT_FOUND (int)0x80000000
 #endif
