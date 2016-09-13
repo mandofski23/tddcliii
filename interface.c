@@ -568,6 +568,8 @@ struct message_alias {
   int local_id;
   int message_id;
   long long chat_id;
+
+  struct TdMessage *message;
 };
 #define message_alias_cmp_local(a,b) (a->local_id - b->local_id)
 #define message_alias_cmp_global(a,b) memcmp(&a->message_id, &b->message_id, 12)
@@ -595,10 +597,37 @@ struct message_alias *convert_global_to_local (long long chat_id, int message_id
   A->local_id = ++ message_local_last_id;
   A->chat_id = chat_id;
   A->message_id = message_id;
+  A->message = NULL;
+  return A;
+}
+
+struct TdMessage *get_message (long long chat_id, int message_id) {
+  struct message_alias *A = convert_global_to_local (chat_id, message_id);
+  return A->message;
+}
+
+void on_message_update (struct TdMessage *MD) {
+  struct message_alias M;
+  M.chat_id = MD->chat_id_;
+  M.message_id = MD->id_;
+
+  struct message_alias *A;
+  A = tree_lookup_message_alias_global (message_global_tree, &M);
+  if (A) {
+    if (!A->message) {
+      A->message = MD;
+      __sync_fetch_and_add (&MD->refcnt, 1);
+    }
+    return;
+  }
+  A = malloc (sizeof (*A));
+  A->local_id = ++ message_local_last_id;
+  A->chat_id = M.chat_id;
+  A->message_id = M.message_id;
+  A->message = MD;
+  __sync_fetch_and_add (&MD->refcnt, 1);
   message_global_tree = tree_insert_message_alias_global (message_global_tree, A, rand ());
   message_local_tree = tree_insert_message_alias_local (message_local_tree, A, rand ());
-
-  return A;
 }
 /* }}} */ 
 
@@ -3382,16 +3411,54 @@ void do_update (struct TdUpdate *U) {
 void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
   switch (Upd->ID) {
   case CODE_UpdateNewMessage:
+    {
+      struct TdUpdateNewMessage *U = (void *)Upd;
+      on_message_update (U->message_);
+    }
     break;
   case CODE_UpdateMessageSendSucceeded:
+    {
+      struct TdUpdateMessageSendSucceeded *U = (void *)Upd;
+      on_message_update (U->message_);
+    }
     break;
   case CODE_UpdateMessageSendFailed:
     break;
   case CODE_UpdateMessageContent:
+    {
+      struct TdUpdateMessageContent *U = (void *)Upd;
+      struct TdMessage *M = get_message (U->chat_id_, U->message_id_);
+      if (M) {
+        TdDestroyObjectMessageContent (M->content_);
+        M->content_ = U->new_content_;
+        if (M->content_) {
+          __sync_fetch_and_add (&M->content_->refcnt, 1);
+        }
+      }
+    }
     break;
   case CODE_UpdateMessageEdited:
+    {
+      struct TdUpdateMessageEdited *U = (void *)Upd;
+      struct TdMessage *M = get_message (U->chat_id_, U->message_id_);
+      if (M) {
+        M->edit_date_ = U->edit_date_;
+        TdDestroyObjectReplyMarkup (M->reply_markup_);
+        M->reply_markup_ = U->reply_markup_;
+        if (M->reply_markup_) {
+          __sync_fetch_and_add (&M->reply_markup_->refcnt, 1);
+        }
+      }
+    }
     break;
   case CODE_UpdateMessageViews:
+    {
+      struct TdUpdateMessageViews *U = (void *)Upd;
+      struct TdMessage *M = get_message (U->chat_id_, U->message_id_);
+      if (M) {
+        M->views_ = U->views_;
+      }
+    }
     break;
   case CODE_UpdateChat:
     {
@@ -5681,6 +5748,7 @@ void print_message_id (struct in_ev *ev, struct TdChat *C, int id) {
 
 void print_message (struct in_ev *ev, struct TdMessage *M) {
   assert (M);
+  on_message_update (M);
 
   struct TdChat *C = get_chat (M->chat_id_);
   struct TdUser *U = get_user (M->sender_user_id_);
