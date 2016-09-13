@@ -5823,6 +5823,19 @@ void print_message (struct in_ev *ev, struct TdMessage *M) {
   }
 
   print_message_content (ev, M->content_);
+
+  if (M->reply_markup_ && M->reply_markup_->ID == CODE_ReplyMarkupInlineKeyboard) {
+    struct TdReplyMarkupInlineKeyboard *R = (void *)M->reply_markup_;
+
+    int i, j;
+    for (i = 0; i < R->rows_->len; i++) {
+      for (j = 0; j < R->rows_->data[i]->len; j++) {
+        struct TdInlineKeyboardButton *B = R->rows_->data[i]->data[j];
+        mprintf (ev, "\n");
+        mprintf (ev, "\tButton: %s", B->text_);
+      }
+    }
+  }
   
   mpop_color (ev);
   assert (!color_stack_pos);
