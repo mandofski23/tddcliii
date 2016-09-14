@@ -1676,17 +1676,17 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
   struct TdInputMessageContent *content = NULL;
   if (media_type && strlen (media_type)) {
     if (!strcmp (media_type, "animation")) {
-      content = (void *)TdCreateObjectInputMessageAnimation ((void *)TdCreateObjectInputFileLocal (file_name), 0, 0, caption);
+      content = (void *)TdCreateObjectInputMessageAnimation ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0, caption);
     } else if (!strcmp (media_type, "audio")) {
-      content = (void *)TdCreateObjectInputMessageAudio ((void *)TdCreateObjectInputFileLocal (file_name), 0, NULL, NULL, caption);
+      content = (void *)TdCreateObjectInputMessageAudio ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, NULL, NULL, caption);
     } else if (!strcmp (media_type, "document")) {
-      content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), caption);
+      content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), NULL, caption);
     } else if (!strcmp (media_type, "photo")) {
       content = (void *)TdCreateObjectInputMessagePhoto ((void *)TdCreateObjectInputFileLocal (file_name), caption);
     } else if (!strcmp (media_type, "sticker")) {
-      content = (void *)TdCreateObjectInputMessageSticker ((void *)TdCreateObjectInputFileLocal (file_name));
+      content = (void *)TdCreateObjectInputMessageSticker ((void *)TdCreateObjectInputFileLocal (file_name), NULL);
     } else if (!strcmp (media_type, "video")) {
-      content = (void *)TdCreateObjectInputMessageVideo ((void *)TdCreateObjectInputFileLocal (file_name), 0, 0, 0, caption);
+      content = (void *)TdCreateObjectInputMessageVideo ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0, 0, caption);
     } else if (!strcmp (media_type, "voice")) {
       content = (void *)TdCreateObjectInputMessageVoice ((void *)TdCreateObjectInputFileLocal (file_name), 0, NULL, caption);
     } else {
@@ -1694,7 +1694,7 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
       return;
     }
   } else {
-    content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), caption);
+    content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), NULL, caption);
   }
 
   TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
@@ -1762,7 +1762,7 @@ void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_
 void do_change_profile_photo (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   char *file_name = args[2].str;
 
-  TdCClientSendCommand(TLS, (void *)TdCreateObjectSetProfilePhoto (file_name, NULL), tdcli_cb, cmd);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectSetProfilePhoto (file_name), tdcli_cb, cmd);
 }
 
 void do_change_profile_name (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -1795,7 +1795,7 @@ void do_chat_change_photo (struct command *command, int arg_num, struct arg args
   long long chat_id = args[2].chat_id;
   char *file_name = args[3].str;
   
-  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChatPhoto (chat_id, (void *)TdCreateObjectInputFileLocal (file_name), NULL), tdcli_cb, cmd);
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectChangeChatPhoto (chat_id, (void *)TdCreateObjectInputFileLocal (file_name)), tdcli_cb, cmd);
 }
 
 void do_chat_change_title (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -5368,6 +5368,9 @@ void print_user_status (struct in_ev *ev, struct TdUserStatus *status) {
 
 void print_user_name (struct in_ev *ev, struct TdUser *U, int id) { 
   if (!U) {
+    U = get_user (id);        
+  }
+  if (!U) {
     struct TdNullaryObject *R = TdCClientSendCommandSync (TLS, (void *)TdCreateObjectGetUser (id));
 
     if (R) {
@@ -5380,8 +5383,8 @@ void print_user_name (struct in_ev *ev, struct TdUser *U, int id) {
       TdDestroyObjectNullaryObject (R);
     }
   }
-  assert (U->ID == CODE_User);
   if (U) {
+    assert (U->ID == CODE_User);
     on_user_update (U);
   }
   if (U && U->my_link_->ID == CODE_LinkStateContact) {
@@ -5401,7 +5404,7 @@ void print_user_name (struct in_ev *ev, struct TdUser *U, int id) {
       mprintf (ev, "%s", U->last_name_);
     }
   } else {
-    mprintf (ev, "user#%d", U ? U->id_ : id);
+    mprintf (ev, "user#id%d", U ? U->id_ : id);
   }
   
   mpop_color (ev);
