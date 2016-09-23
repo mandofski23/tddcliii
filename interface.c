@@ -1236,7 +1236,7 @@ void update_prompt (void) {
   set_prompt (get_default_prompt ());
   if (readline_active) {
     #ifdef READLINE_GNU
-    rl_redisplay ();
+    rl_forced_update_display ();
     #endif
   }
   #ifdef READLINE_GNU
@@ -4915,7 +4915,7 @@ void interpreter_ex (struct in_command *cmd) {
   }
 
   if (line && *line) {
-    //add_history (line);
+    add_history (line);
   }
 
   struct arg args[12];
@@ -5002,6 +5002,7 @@ void deactivate_readline (void) {
     rl_replace_line("", 0);
     rl_redisplay();
     #else
+    printf ("\033[2K\r");
     set_prompt ("");
     //rl_line_buffer[0] = 0;
     //rl_point = 0;
@@ -5033,7 +5034,7 @@ void reactivate_readline (void) {
     #else
     //rl_line_buffer = strdup (saved_line);
     //rl_point = saved_point;
-    //rl_redisplay();
+    rl_forced_update_display();
     #endif
     free (saved_line);
   }
@@ -5060,6 +5061,7 @@ void print_end (void) {
     reactivate_readline ();
   }
   prompt_was = 0;
+  need_prompt_update = 1;
 }
 
 /*void hexdump (int *in_ptr, int *in_end) {
@@ -5802,19 +5804,20 @@ void print_message_chat_migrate_from (struct in_ev *ev, struct TdMessageChatMigr
   mprintf (ev, "migrated from group");
 }
 
-void print_message_pin_message (struct in_ev *ev, struct TdMessagePinMessage *act) {
-  mprintf (ev, "pinned message %d", act->message_id_);
+void print_message_pin_message (struct in_ev *ev, struct TdChat *C, struct TdMessagePinMessage *act) {
+  mprintf (ev, "pinned message");
+  print_message_id (ev, C, act->message_id_);
 }
 
 void print_message_game_score (struct in_ev *ev, struct TdMessageGameScore *act) {
-  mprintf (ev, "scored %d points in game %d (message %d)", act->score_, act->game_id_, act->game_message_id_);
+  mprintf (ev, "scored %d points in game %d", act->score_, act->game_id_);
 }
 
 void print_message_unsupported (struct in_ev *ev, struct TdMessageUnsupported *act) {
   mprintf (ev, "[unsupported]");
 }
 
-void print_message_content (struct in_ev *ev, struct TdMessageContent *content) {
+void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMessageContent *content) {
   switch (content->ID) {
   case CODE_MessageAnimation:
     return print_message_animation (ev, (void *)content);
@@ -5857,7 +5860,7 @@ void print_message_content (struct in_ev *ev, struct TdMessageContent *content) 
   case CODE_MessageChatMigrateFrom:
     return print_message_chat_migrate_from (ev, (void *)content);
   case CODE_MessagePinMessage:
-    return print_message_pin_message (ev, (void *)content);
+    return print_message_pin_message (ev, chat, (void *)content);
   case CODE_MessageGameScore:
     return print_message_game_score (ev, (void *)content);
   case CODE_MessageUnsupported:
@@ -5952,7 +5955,7 @@ void print_message (struct in_ev *ev, struct TdMessage *M) {
     }
   }
 
-  print_message_content (ev, M->content_);
+  print_message_content (ev, C, M->content_);
 
   if (M->reply_markup_ && M->reply_markup_->ID == CODE_ReplyMarkupInlineKeyboard) {
     struct TdReplyMarkupInlineKeyboard *R = (void *)M->reply_markup_;

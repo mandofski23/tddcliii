@@ -25,6 +25,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <assert.h>
+
 #ifdef __FreeBSD__
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -34,6 +35,7 @@
 #include <readline/readline.h>
 #else
 #include <editline/readline.h>
+#include <locale.h>
 #endif
 
 #include <sys/stat.h>
@@ -55,6 +57,8 @@
 #include <netinet/in.h>
 
 #include <getopt.h>
+
+#include "auto/git_info.h"
 
 #ifdef USE_LUA
 #  include "lua-tg.h"
@@ -815,6 +819,10 @@ int main (int argc, char **argv) {
   signal (SIGTERM, sig_term_handler);
   signal (SIGINT, sig_term_handler);
 
+  #ifndef READLINE_GNU
+  setlocale (LC_ALL, "en_US.UTF-8");
+  #endif
+
   //tdlib_set_logger_function (logprintf);
   //tdlib_do_start_scheduler ();
   rl_catch_signals = 0;
@@ -904,13 +912,13 @@ int main (int argc, char **argv) {
       "Telegram-cli comes with ABSOLUTELY NO WARRANTY; for details type `show_license'.\n"
       "This is free software, and you are welcome to redistribute it\n"
       "under certain conditions; type `show_license' for details.\n"
-      "Telegram-cli uses tdlib version " "???" "\n"
-#ifndef TGL_AVOID_OPENSSL 
+      "Telegram-cli uses tdlib (commit " GIT_COMMIT ")\n"
       "Telegram-cli includes software developed by the OpenSSL Project\n"
       "for use in the OpenSSL Toolkit. (http://www.openssl.org/)\n"
-#endif
-#ifdef USE_PYTHON
-      "Telegram-cli uses libpython version " PY_VERSION "\n"
+#ifdef READLINE_GNU
+      "Telegram-cli uses libreadline\n"
+#else
+      "Telegram-cli uses libedit\n"
 #endif
     );
   }

@@ -237,14 +237,14 @@ void net_loop (void) {
       TdCClientWork (TLS);
       
       update_prompt ();
-      rl_redisplay ();
+      //rl_redisplay ();
 
       need_update = 0;
     } else if (need_prompt_update) {
       need_prompt_update = 0;
       
       update_prompt ();
-      rl_redisplay ();
+      //rl_forced_update_display ();
     }
   }
 
