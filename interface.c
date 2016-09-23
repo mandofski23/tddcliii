@@ -22,13 +22,21 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 
+#ifdef READLINE_GNU
 #include <readline/readline.h>
 #include <readline/history.h>
+#else
+#include <editline/readline.h>
+#endif
+
 #include <unistd.h>
 
 #include <sys/types.h>
 #include <sys/wait.h>
+
+#include <time.h>
 
 //#include "queries.h"
 
@@ -70,12 +78,11 @@
 #define OPEN_BIN "xdg-open '%s'"
 #endif
 
-#ifdef USE_JSON
-#  include <jansson.h>
-#  include "json-tg.h"
-#endif
-
 #include <errno.h>
+
+#ifdef USE_JSON
+#include "json-tg.h"
+#endif
 
 #include "tree.h"
 
@@ -85,8 +92,9 @@ extern struct event_base *ev_base;
 int total_unread;
 int disable_msg_preview;
 int my_id;
+int need_prompt_update;
 
-char * conn_state;
+char *conn_state;
 
 struct delayed_query {
   struct in_command *cmd;
@@ -1221,12 +1229,19 @@ void update_prompt (void) {
     return;
   }
   if (read_one_string) { return; }
+
+  #ifdef READLINE_GNU
   print_start ();
+  #endif
   set_prompt (get_default_prompt ());
   if (readline_active) {
+    #ifdef READLINE_GNU
     rl_redisplay ();
+    #endif
   }
+  #ifdef READLINE_GNU
   print_end ();
+  #endif
 }
 
 char *modifiers[] = {
@@ -4900,7 +4915,7 @@ void interpreter_ex (struct in_command *cmd) {
   }
 
   if (line && *line) {
-    add_history (line);
+    //add_history (line);
   }
 
   struct arg args[12];
@@ -4952,6 +4967,8 @@ void interpreter (char *line) {
   interpreter_ex (cmd);
   in_readline = 0;
   in_command_decref (cmd);
+
+  need_prompt_update = 1;
 }
 
 int readline_active;
@@ -4979,10 +4996,17 @@ void deactivate_readline (void) {
     assert (saved_line);
     saved_line[rl_end] = 0;
     memcpy (saved_line, rl_line_buffer, rl_end);
-
+  
+    #ifdef READLINE_GNU
     rl_save_prompt();
     rl_replace_line("", 0);
     rl_redisplay();
+    #else
+    set_prompt ("");
+    //rl_line_buffer[0] = 0;
+    //rl_point = 0;
+    //rl_redisplay();
+    #endif
   }
 }
 
@@ -5000,10 +5024,17 @@ void reactivate_readline (void) {
     }
     fflush (stdout);
   } else {
+    fflush (stdout);
     set_prompt (get_default_prompt ());
+    #ifdef READLINE_GNU
     rl_replace_line(saved_line, 0);
     rl_point = saved_point;
     rl_redisplay();
+    #else
+    //rl_line_buffer = strdup (saved_line);
+    //rl_point = saved_point;
+    //rl_redisplay();
+    #endif
     free (saved_line);
   }
 }
@@ -5039,31 +5070,16 @@ void print_end (void) {
   mprint_end (ev); 
 }*/
 
+char log_buf[1 << 20];
+
 void logprintf (const char *format, ...) {
-  int x = 0;
-  if (!prompt_was) {
-    x = 1;
-    print_start ();
-  }
-  if (!disable_colors) {
-    printf (COLOR_GREY);
-  }
-  printf (" *** ");
-
-
-  double T = (double)time (0);
-  printf ("%.6lf ", T);
-
   va_list ap;
   va_start (ap, format);
-  vfprintf (stdout, format, ap);
+  vsnprintf (log_buf, (1 << 20) - 1, format, ap);
   va_end (ap);
-  if (!disable_colors) {
-    printf (COLOR_NORMAL);
-  }
-  if (x) {
-    print_end ();
-  }
+
+  double T = (double)time (0);
+  fprintf (stderr, " *** %.6lf %s\n", T, log_buf);
 }
 
 int color_stack_pos;
@@ -5975,13 +5991,28 @@ void play_sound (void) {
   printf ("\a");
 }
 
+
+#ifndef READLINE_GNU
+char **tdcli_attempted_completion (const char *text, int start, int end) {
+  return completion_matches (text, command_generator);
+}
+#endif
+
 void set_interface_callbacks (void) {
   if (readline_disabled) { return; }
   readline_active = 1;
+  #ifdef READLINE_GNU
   rl_filename_quote_characters = strdup (" ");
+  #else
+  assert (rl_initialize () >= 0);
+  #endif
   rl_basic_word_break_characters = strdup (" ");
   
   
   rl_callback_handler_install (get_default_prompt (), interpreter);
+  #ifdef READLINE_GNU
   rl_completion_entry_function = command_generator;
+  #else
+  rl_attempted_completion_function = tdcli_attempted_completion;
+  #endif
 }

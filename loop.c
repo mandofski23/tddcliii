@@ -30,8 +30,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef READLINE_GNU
 #include <readline/readline.h>
-#include <readline/history.h>
+#else
+#include <editline/readline.h>
+#endif
 
 #include <errno.h>
 #include <poll.h>
@@ -128,7 +132,11 @@ void do_get_string (void *TLS, char *prompt, int flags) {
 
 static void stdin_read_callback (evutil_socket_t fd, short what, void *arg) {
   if (!readline_disabled && !read_one_string) {
+    //logprintf ("rl_callback_read_char ()\n");
     rl_callback_read_char ();
+    #ifndef READLINE_GNU
+    //rl_redisplay ();
+    #endif
     return;
   }
   if (read_one_string) {
@@ -197,6 +205,8 @@ static void pipe_read_cb (evutil_socket_t fd, short what, void *arg) {
   read (fd, &x, 4);
 }
 
+extern int need_prompt_update;
+
 void net_loop (void) {
   delete_stdin_event = 0;
   logprintf ("Starting netloop\n");
@@ -225,9 +235,16 @@ void net_loop (void) {
     //tdlib_do_run_scheduler (0.001);
     if (need_update) {
       TdCClientWork (TLS);
-    
+      
       update_prompt ();
-      //need_update = 0;
+      rl_redisplay ();
+
+      need_update = 0;
+    } else if (need_prompt_update) {
+      need_prompt_update = 0;
+      
+      update_prompt ();
+      rl_redisplay ();
     }
   }
 
@@ -472,6 +489,8 @@ void wakeup (void *TLS) {
 extern struct TdCClientParameters params;
 
 int loop (void) {
+  set_interface_callbacks ();
+
   ev_base = event_base_new ();
 
   int p[2];
@@ -494,8 +513,6 @@ int loop (void) {
     event_add (ev, 0);
   }
   update_prompt ();
-
-  set_interface_callbacks ();
 
   TLS = TdCClientStart (&params);
   assert (TLS);

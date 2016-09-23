@@ -29,7 +29,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #endif
+
+#ifdef READLINE_GNU
 #include <readline/readline.h>
+#else
+#include <editline/readline.h>
+#endif
 
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -90,6 +95,7 @@ struct TdCClientParameters params = {
   .notify_need_work = wakeup 
 };
 
+char *logname;
 
 
 int bot_mode;
@@ -344,6 +350,25 @@ void parse_config (void) {
   params.database_directory = strdup (data_directory);
   params.files_directory = strdup (data_directory);
 
+  if (!logname) {
+    parse_config_val (&conf, &logname, "logname", 0, config_directory);
+    printf ("I: logname = '%s'\n", logname);
+    if (logname) {
+      int fd = open (logname, O_WRONLY | O_APPEND | O_CREAT);
+      if (fd < 0) {
+        logprintf ("Can not open logfile '%s': %m\n", logname);
+      }
+      assert (dup2 (fd, 2) == 2);
+      close (fd);
+    }
+  }
+
+  if (!verbosity) {
+    strcpy (buf + l, "verbosity");
+    config_lookup_int (&conf, buf, &verbosity);
+    TdCClientSetVerbosity (verbosity);
+  }
+
   if (!lua_file) {
     parse_config_val (&conf, &lua_file, "lua_script", 0, config_directory);
     printf ("I: lua_file = '%s'\n", lua_file);
@@ -448,7 +473,6 @@ int register_mode;
 int disable_auto_accept;
 int wait_dialog_list;
 
-char *logname;
 int daemonize=0;
 
 
@@ -857,6 +881,15 @@ int main (int argc, char **argv) {
     listen (usfd, 5);    
   } else {
     usfd = -1;
+  }
+
+  if (logname) {
+    int fd = open (logname, O_WRONLY | O_APPEND | O_CREAT);
+    if (fd < 0) {
+      logprintf ("Can not open logfile '%s': %m\n", logname);
+    }
+    assert (dup2 (fd, 2) == 2);
+    close (fd);
   }
 
   if (daemonize) {
