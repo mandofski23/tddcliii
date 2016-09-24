@@ -15,12 +15,7 @@ endif (LIBCONFIG_FOUND)
 
 option (USE_LIBEDIT "use libedit instead of libreadline" OFF)
 if (USE_LIBEDIT) 
-  find_package(LibEdit REQUIRED)
-  if (LIBEDIT_FOUND)
-    add_definitions("-DREADLINE_EDIT=1")
-    include_directories(${LIBEDIT_INCLUDE_DIR})
-  endif (LIBEDIT_FOUND)
-  set (EDIT_LIBS ${LIBEDIT_LIBRARIES} -lncursesw )
+  set (EDIT_LIBS tdedit -lncursesw -lbsd )
 else (USE_LIBEDIT)
   find_package(Readline REQUIRED)
   if (READLINE_FOUND)
@@ -66,8 +61,8 @@ endif (HAVE_EXECINFO_H)
 
 set (CMAKE_C_FLAGS "-fno-strict-aliasing -fwrapv -Wall -Wextra -W -Wno-unused-parameter -Wno-deprecated-declarations -Wconversion -Wno-sign-conversion -Wno-sign-compare -fno-omit-frame-pointer")
 set (CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations -Wconversion -Wno-sign-conversion -std=c++14 -fno-omit-frame-pointer")
-set (CMAKE_C_FLAGS_RELEASE "-flto -O3")
-set (CMAKE_CXX_FLAGS_RELEASE "-flto -O3")
+set (CMAKE_C_FLAGS_RELEASE "-O3")
+set (CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 set (TDCLI_SOURCE
   main.c
@@ -77,7 +72,35 @@ set (TDCLI_SOURCE
   json-tg.c
 )
 
+set (LIBTDEDIT_SOURCE
+  libedit/chared.c 
+  libedit/common.c 
+  libedit/el.c 
+  libedit/eln.c 
+  libedit/emacs.c 
+  libedit/hist.c 
+  libedit/keymacro.c 
+  libedit/map.c 
+  libedit/chartype.c 
+  libedit/parse.c 
+	libedit/prompt.c 
+  libedit/read.c 
+  libedit/refresh.c 
+  libedit/search.c 
+  libedit/sig.c 
+  libedit/terminal.c 
+  libedit/tty.c 
+  libedit/vi.c 
+  libedit/wcsdup.c 
+	libedit/tokenizer.c 
+  libedit/tokenizern.c 
+	libedit/history.c 
+  libedit/historyn.c 
+	libedit/filecomplete.c 
+  libedit/readline.c 
+)
 
+add_library (tdedit STATIC ${LIBTDEDIT_SOURCE})
 add_executable (telegram-cli ${TDCLI_SOURCE})
 target_link_libraries (telegram-cli tdc tdclient ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${EDIT_LIBS} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread )
 install (TARGETS telegram-cli
