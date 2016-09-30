@@ -3452,8 +3452,46 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateDeleteMessages:
     break;
   case CODE_UpdateUserAction:
+    {
+      struct TdUpdateUserAction *U = (void *)Upd;
+      if ((!disable_output || arg) && log_level >= 2) {       
+        mprint_start (ev);
+        mpush_color (ev, COLOR_YELLOW);
+
+        print_date (ev, time (0));
+        mprintf (ev, "User ");
+        print_user_name (ev, NULL, U->user_id_);
+        mprintf (ev, " is now ");
+        print_send_message_action (ev, U->action_);
+        if (U->chat_id_) {
+          mprintf (ev, " is chat ");
+          print_chat_name (ev, NULL, U->chat_id_);
+        }
+        mprintf (ev, "\n");
+        mpop_color (ev);
+
+        mprint_end (ev);
+      }
+    }
     break;
   case CODE_UpdateUserStatus:
+    {
+      struct TdUpdateUserStatus *U = (void *)Upd;
+
+      if ((!disable_output || arg) && log_level >= 3) {       
+        mprint_start (ev);
+        mpush_color (ev, COLOR_YELLOW);
+
+        print_date (ev, time (0));
+        print_user_name (ev, NULL, U->user_id_);
+        mprintf (ev, " is now ");
+        print_user_status (ev, U->status_);
+        mprintf (ev, "\n");
+        mpop_color (ev);
+
+        mprint_end (ev);
+      }
+    }
     break;
   case CODE_UpdateUser:
     break;
@@ -3468,6 +3506,19 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateUserBlocked:
     break;
   case CODE_UpdateNewAuthorization:
+    if ((!disable_output || arg) && log_level >= 0) {       
+      struct TdUpdateNewAuthorization *U = (void *)Upd;
+      mprint_start (ev);
+      mpush_color (ev, COLOR_YELLOW);
+
+      print_date (ev, time (0));
+      mprintf (ev, "New authorization: ");
+      print_date (ev, U->date_);
+      mprintf (ev, " device=%s location=%s\n", U->device_, U->location_);
+      mpop_color (ev);
+
+      mprint_end (ev);
+    }
     break;
   case CODE_UpdateFileProgress:
     break;
@@ -3806,651 +3857,6 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
   }
   do_update (Upd);
 }
-/*
-void on_new_msg (struct tdlib_state *TLSR, struct tdl_message *M, int disable_notifications) {
-  assert (TLSR == TLS);
-  if (alert_sound && !disable_notifications) {
-    play_sound ();
-  }
-  
-  struct tdl_chat_info *C = tdlib_instant_get_chat (TLS, M->chat_id);
-  if (C) {
-    struct telegram_cli_chat_extra *e = C->extra;
-    total_unread += C->unread_count - e->unread_count;    
-    e->unread_count = C->unread_count;
-  }
-
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].message = M;
-  args[1].num = disable_notifications;
-
-  static struct update_description D = {
-    {{"message", ra_message}, {"disable_notifications", ra_int}},
-    default_on_new_msg,
-    "new_msg"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void default_on_edit_msg (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-}
-
-void on_edit_msg (struct tdlib_state *TLSR, struct tdl_message *M) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].message = M;
-
-  static struct update_description D = {
-    {{"message", ra_message}},
-    default_on_edit_msg,
-    "edit_msg"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-
-void default_on_user_update (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-}
-
-void on_user_update (struct tdlib_state *TLSR, struct tdl_user *U) {
-  struct telegram_cli_chat_extra *e = U->extra;
-  if (!U->extra) {
-    e = calloc (sizeof (*e), 1);
-    e->owner_type = tdl_chat_type_user;
-    e->owner = U;
-    U->extra = e;
-  
-    char s[20];
-    sprintf (s, "user#id%d", U->id);
-    e->main_alias = strdup (s);
-    add_alias_internal (e, s);
-  }
-
-  char *u;
-  
-  u = generate_alias_username (U->username);
-  sub_alias_internal (e, e->username_alias, u);
-  upd_str (&e->username_alias, u);
-  
-  if (e->owner == U) {
-    u = generate_alias_name (e, U->first_name, U->last_name);
-    sub_alias_internal (e, e->name_alias, u);
-    upd_str (&e->name_alias, u);
-  }
-  
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].user = U;
-
-  static struct update_description D = {
-    {{"user", ra_user}},
-    default_on_user_update,
-    "user_update"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void default_on_group_update (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-}
-
-void on_group_update (struct tdlib_state *TLSR, struct tdl_group *G) {
-  struct telegram_cli_chat_extra *e = G->extra;
-  if (!G->extra) {
-    e = calloc (sizeof (*e), 1);
-    e->owner_type = tdl_chat_type_group;
-    e->owner = G;
-    G->extra = e;
-  
-    char s[20];
-    sprintf (s, "group#id%d", G->id);
-    e->main_alias = strdup (s);
-    add_alias_internal (e, s);
-  }
-  
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].group = G;
-
-  static struct update_description D = {
-    {{"group", ra_group}},
-    default_on_group_update,
-    "group_update"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void default_on_channel_update (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-}
-
-void on_channel_update (struct tdlib_state *TLSR, struct tdl_channel *Ch) {
-  struct telegram_cli_chat_extra *e = Ch->extra;
-  if (!Ch->extra) {
-    e = calloc (sizeof (*e), 1);
-    e->owner_type = tdl_chat_type_channel;
-    e->owner = Ch;
-    Ch->extra = e;
-  
-    char s[20];
-    sprintf (s, "channel#id%d", Ch->id);
-    e->main_alias = strdup (s);
-    add_alias_internal (e, s);
-  }
-
-  char *u;
-  
-  u = generate_alias_username (Ch->username);
-  sub_alias_internal (e, e->username_alias, u);
-  upd_str (&e->username_alias, u);
-  
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].channel = Ch;
-
-  static struct update_description D = {
-    {{"channel", ra_channel}},
-    default_on_channel_update,
-    "channel_update"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void on_secret_chat_update (struct tdlib_state *TLSR, struct tdl_secret_chat *U) {}
-
-void default_on_chat_update (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-}
-
-void on_chat_update (struct tdlib_state *TLSR, struct tdl_chat_info *C) {
-  struct telegram_cli_chat_extra *e = C->extra;
-  if (!e) {
-    if (!C->chat->extra) {
-      switch (C->chat->type) {
-      case tdl_chat_type_user:
-        on_user_update (TLS, &C->chat->user);
-        break;
-      case tdl_chat_type_group:
-        on_group_update (TLS, &C->chat->group);
-        break;
-      case tdl_chat_type_channel:
-        on_channel_update (TLS, &C->chat->channel);
-        break;
-      case tdl_chat_type_secret_chat:
-        on_secret_chat_update (TLS, &C->chat->secret_chat);
-        break;
-      }
-    }
-    assert (C->chat->extra);
-    C->extra = C->chat->extra;
-    e = C->extra;
-    e->owner = C;
-    e->owner_type = -1;
-    upd_aliases_internal (e);
-  }
-
-  assert (e);
-
-  char *u;
-  u = generate_alias_title (e, C->title);
-  sub_alias_internal (e, e->name_alias, u);
-  upd_str (&e->name_alias, u);
-
-  total_unread += C->unread_count - e->unread_count;
-  e->unread_count = C->unread_count;
- 
-  
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].chat = C;
-
-  static struct update_description D = {
-    {{"chat", ra_chat}},
-    default_on_chat_update,
-    "chat_update"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void on_net_state_change (struct tdlib_state *TLS, enum tdl_connection_state new_state) {
-  conn_state = new_state;
-  update_prompt ();
-}
-  
-void on_my_id (struct tdlib_state *TLS, int id) {
-  assert (!TLS->my_id || TLS->my_id == id);
-  TLS->my_id = id;
-  
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].num = id;
-
-  static struct update_description D = {
-    {{"id", ra_int}},
-    NULL,
-    "self_id"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
- 
-void default_on_type_notification (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-  if (log_level < 2) { return; }
-
-  struct tdl_chat_info *C = args[0].chat;
-  struct tdl_user *U = args[1].user;
-
-  const char *type = args[2].str;
-  int progress = args[3].num;
-    
-  struct in_ev *ev = NULL;
-  mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-  print_date (notify_ev, time (0));
-  print_user_name (ev, U, U->id);
-  if (C->chat != (union tdl_chat *)U) {
-    mprintf (ev, " in ");
-    print_chat_name (ev, C, C->id);
-  }
-  mprintf (ev, " ");
-
-  if (!strcmp (type, "typing")) {
-    mprintf (ev, "is typing");
-  } else if (!strcmp (type, "cancel")) {
-    mprintf (ev, "deleted typed message");
-  } else if (!strcmp (type, "record_video")) {
-    mprintf (ev, "is recording video");
-  } else if (!strcmp (type, "upload_video")) {
-    mprintf (ev, "is uploading video: progress %d%%", progress);
-  } else if (!strcmp (type, "record_voice")) {
-    mprintf (ev, "is recording voice message");
-  } else if (!strcmp (type, "upload_voice")) {
-    mprintf (ev, "is uploading voice message: progress %d%%", progress);
-  } else if (!strcmp (type, "upload_photo")) {
-    mprintf (ev, "is uploading photo: progress %d%%", progress);
-  } else if (!strcmp (type, "upload_document")) {
-    mprintf (ev, "is uploading document: progress %d%%", progress);
-  } else if (!strcmp (type, "send_location")) {
-    mprintf (ev, "is choosing geo location");
-  } else if (!strcmp (type, "contact_contact")) {
-    mprintf (ev, "is choosing contact");
-  }
-  mprintf (ev, "\n");
-  mpop_color (ev);
-  mprint_end (ev);
-}
-
-void on_type_notification (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_user *U, union tdl_user_action *action) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].chat = C;
-  args[1].user = U;
-  args[3].num = 0;
-  args[2].flags = 1;
-  switch (action->type) {
-    case tdl_message_typing_action_typing:
-      args[2].str = strdup ("typing");
-      break;
-    case tdl_message_typing_action_cancel:
-      args[2].str = strdup ("cancel");
-      break;
-    case tdl_message_typing_action_record_video:
-      args[2].str = strdup ("record_video");
-      break;
-    case tdl_message_typing_action_upload_video:
-      args[2].str = strdup ("upload_video");
-      args[3].num = action->upload.progress;
-      break;
-    case tdl_message_typing_action_record_voice:
-      args[2].str = strdup ("record_voice");
-      break;
-    case tdl_message_typing_action_upload_voice:
-      args[2].str = strdup ("upload_voice");
-      args[3].num = action->upload.progress;
-      break;
-    case tdl_message_typing_action_upload_photo:
-      args[2].str = strdup ("upload_photo");
-      args[3].num = action->upload.progress;
-      break;
-    case tdl_message_typing_action_upload_document:
-      args[2].str = strdup ("upload_document");
-      args[3].num = action->upload.progress;
-      break;
-    case tdl_message_typing_action_send_location:
-      args[2].str = strdup ("send_location");
-      break;
-    case tdl_message_typing_action_choose_contact:
-      args[2].str = strdup ("choose_contact");
-      break;
-  }
-
-
-  static struct update_description D = {
-    {{"chat", ra_chat}, {"user", ra_user}, {"type", ra_string}, {"progress", ra_int}},
-    default_on_type_notification,
-    "type_notification"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-  
-void default_on_new_authorization (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-  struct in_ev *ev = NULL;
-  
-  mprint_start (ev);
-  mpush_color (ev, COLOR_REDB);
-  print_date (ev, time (0));
-  mprintf (ev, "New authorization: device '%s' location '%s'\n", args[0].str, args[1].str);
-  mpop_color (ev);
-  mprint_end (ev);
-}
-
-void on_new_authorization (struct tdlib_state *TLS, int date, const char *device, const char *location) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].str = strdup (device);
-  args[0].flags = 1;
-  args[1].str = strdup (location);
-  args[1].flags = 1;
-  args[2].num = date;
-
-  static struct update_description D = {
-    {{"device", ra_string}, {"location", ra_string}, {"date", ra_int}},
-    default_on_new_authorization,
-    "new_authorization"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void on_stickers_updated (struct tdlib_state *TLS) { return; }
-void on_saved_animations_updated(struct tdlib_state *TLS) { return; }
-
-void default_on_user_status_update (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-  if (log_level < 3) { return; }
-
-  struct in_ev *ev = NULL;
-
-  struct tdl_user *U = args[0].user;
-  mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-
-  print_date (ev, time (0));
-  print_user_name (ev, U, U->id);
-  mprintf (ev, " is now ");
-  print_user_status (ev, U->status);
-  mprintf (ev, "\n");
-  mpop_color (ev);
-
-  mprint_end (ev);
-}
-
-void on_user_status_update (struct tdlib_state *TLS, struct tdl_user *U) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].user = U;
-
-  static struct update_description D = {
-    {{"user", ra_user}},
-    default_on_user_status_update,
-    "user_status"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void default_on_messages_deleted (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-  struct in_ev *ev = NULL;
-
-  struct tdl_chat_info *C = args[0].chat;
-  
-  mprint_start (ev);
-  mpush_color (ev, COLOR_YELLOW);
-  print_date (ev, time (0));
-  mprintf (ev, "Deleted %d messages from ", args[1].vec_len);
-  print_chat_name (ev, C, C->id);
-  mprintf (ev, "\n");
-  mpop_color (ev);
-  mprint_end (ev);
-}
-
-void on_messages_deleted (struct tdlib_state *TLS, struct tdl_chat_info *C, int cnt, int *ids) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].chat = C;
-  args[1].flags = 2;
-  args[1].vec_len = cnt;
-  args[1].vec = calloc (sizeof (struct res_arg), cnt);
-  int i;
-  for (i = 0; i < cnt; i++) {
-    args[1].vec[i].num = ids[i];
-  }
-
-  static struct update_description D = {
-    {{"chat", ra_chat}, {"ids", ra_int | ra_vector}},
-    default_on_messages_deleted,
-    "delete_messages"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void on_reply_markup_updated (struct tdlib_state *TLS, struct tdl_chat_info *C) {}
- 
-
-void default_on_message_sent (void *extra, struct update_description *D, struct res_arg args[]) {
-  if (disable_output) { return; }
-
-  default_on_new_msg (extra, D, args);
-}
-
-void on_message_sent (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_message *M, int old_message_id) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].message = M;
-  args[1].num = old_message_id;
-
-  static struct update_description D = {
-    {{"message", ra_message}, {"old_id", ra_int}},
-    default_on_message_sent,
-    "message_sent"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-  
-void on_message_failed (struct tdlib_state *TLS, struct tdl_chat_info *C, struct tdl_message *M, int error_code, const char *error) {}
-  
-void on_updated_message_content(struct tdlib_state *TLS, struct tdl_chat_info *C, int message_id, union tdl_message_content *content) {}
-  
-void on_updated_message_views(struct tdlib_state *TLS, struct tdl_chat_info *C, int message_id, int views) {}
-  
-void on_updated_chat_top_message(struct tdlib_state *TLS, struct tdl_chat_info *C) {}
-void on_updated_chat_order(struct tdlib_state *TLS, struct tdl_chat_info *C) {}
-  
-void default_on_updated_chat_title (void *extra, struct update_description *D, struct res_arg args[]) {
-}
-
-void on_updated_chat_title (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  if (!C->extra) { return; }
-  
-  struct telegram_cli_chat_extra *e = C->extra;
-  assert (e);
-
-  char *u;
-  u = generate_alias_title (e, C->title);
-  sub_alias_internal (e, e->name_alias, u);
-  upd_str (&e->name_alias, u);
-
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].chat = C;
-
-  static struct update_description D = {
-    {{"chat", ra_chat}},
-    default_on_updated_chat_title,
-    "chat_update_title"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-  
-void default_on_updated_chat_photo (void *extra, struct update_description *D, struct res_arg args[]) {
-}
-  
-void on_updated_chat_photo (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].chat = C;
-
-  static struct update_description D = {
-    {{"chat", ra_chat}},
-    default_on_updated_chat_photo,
-    "chat_update_photo"
-  };
-
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void default_on_read_inbox (void *extra, struct update_description *D, struct res_arg args[]) {
-}
-  
-void on_marked_read_inbox (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  struct telegram_cli_chat_extra *e = C->extra;
-  total_unread += C->unread_count - e->unread_count;
-  e->unread_count = C->unread_count;
-
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].chat = C;
-
-  static struct update_description D = {
-    {{"chat", ra_chat}},
-    default_on_read_inbox,
-    "chat_read_inbox"
-  };
-  
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
- 
-  update_prompt ();
-}
-
-void default_on_read_outbox (void *extra, struct update_description *D, struct res_arg args[]) {
-}
-  
-void on_marked_read_outbox (struct tdlib_state *TLS, struct tdl_chat_info *C) {
-  struct res_arg args[10];
-  memset (&args, 0, sizeof (args));
-  args[0].chat = C;
-
-  static struct update_description D = {
-    {{"chat", ra_chat}},
-    default_on_read_outbox,
-    "chat_read_outbox"
-  };
-  
-  do_update (&D, args);
-
-  free_res_arg_list (args, 10);
-}
-
-void on_update_file_progress (struct tdlib_state *TLS, long long file_id, int size, int ready) {
-}
-  
-void on_update_file (struct tdlib_state *TLS, struct tdl_file *F) {
-  if (F->path) {
-    struct file_wait *W = tree_lookup_file_wait (file_wait_tree, (void *)&F->id);
-    if (W) {
-      struct file_wait_cb *cb = W->first_cb;
-      while (cb) {
-        cb->callback (TLS, cb->callback_extra, 1, F->path);
-        struct file_wait_cb *n = cb->next;
-        free (cb);
-        cb = n;
-      }
-      file_wait_tree = tree_delete_file_wait (file_wait_tree, W);
-      free (W);
-    }
-  }
-}
-
-void wakeup (struct tdlib_state *TLS);
-
-struct tgl_update_callback upd_cb = {
-  .wakeup = wakeup,
-  .user_update = on_user_update,
-  .group_update = on_group_update,
-  .channel_update = on_channel_update,
-  .secret_chat_update = on_secret_chat_update,
-  .chat_update = on_chat_update,
-  .new_msg = on_new_msg,
-  .edit_msg = on_edit_msg,
-  .change_net_state = on_net_state_change,
-  .my_id = on_my_id,
-  .type_notification = on_type_notification,
-  .new_authorization = on_new_authorization,
-  .stickers_updated = on_stickers_updated,
-  .saved_animations_updated = on_saved_animations_updated,
-  .user_status_update = on_user_status_update,
-  .messages_deleted = on_messages_deleted,
-  .reply_markup_updated = on_reply_markup_updated,
-  .message_sent = on_message_sent,
-  .message_failed = on_message_failed,
-  .updated_message_content = on_updated_message_content,
-  .updated_message_views = on_updated_message_views,
-  .updated_chat_top_message = on_updated_chat_top_message,
-  .updated_chat_order = on_updated_chat_order,
-  .updated_chat_title = on_updated_chat_title,
-  .updated_chat_photo = on_updated_chat_photo,
-  .marked_read_inbox = on_marked_read_inbox,
-  .marked_read_outbox = on_marked_read_outbox,
-  .update_file_progress = on_update_file_progress,
-  .update_file = on_update_file
-
-};*/
 
 int parse_argument_modifier (struct in_command *cmd, struct arg *A, struct command_argument_desc *D) {
   int opt = (D->type & ca_optional) | (D->type & ca_period);
@@ -5359,6 +4765,41 @@ void print_service_message (struct in_ev *ev, struct tdl_message *M) {
 
 tgl_peer_id_t last_from_user_id;
 tgl_peer_id_t last_to_id;
+
+void print_send_message_action (struct in_ev *ev, struct TdSendMessageAction *action) {
+  switch ((enum List_SendMessageAction)action->ID) {
+  case CODE_SendMessageTypingAction:
+    mprintf (ev, "is typing");
+    break;
+  case CODE_SendMessageCancelAction:
+    mprintf (ev, "deleted typed message");
+    break;
+  case CODE_SendMessageRecordVideoAction:
+    mprintf (ev, "is recording video");
+    break;
+  case CODE_SendMessageUploadVideoAction:
+    mprintf (ev, "is uploading video: progress %d%%", ((struct TdSendMessageUploadVideoAction *)action)->progress_);
+    break;
+  case CODE_SendMessageRecordVoiceAction:
+    mprintf (ev, "is recording voice message");
+    break;
+  case CODE_SendMessageUploadVoiceAction:
+    mprintf (ev, "is uploading voice message: progress %d%%", ((struct TdSendMessageUploadVoiceAction *)action)->progress_);
+    break;
+  case CODE_SendMessageUploadPhotoAction:
+    mprintf (ev, "is uploading photo: progress %d%%", ((struct TdSendMessageUploadPhotoAction *)action)->progress_);
+    break;
+  case CODE_SendMessageUploadDocumentAction:
+    mprintf (ev, "is uploading document: progress %d%%", ((struct TdSendMessageUploadDocumentAction *)action)->progress_);
+    break;
+  case CODE_SendMessageGeoLocationAction:
+    mprintf (ev, "is choosing geo location");
+    break;
+  case CODE_SendMessageChooseContactAction:
+    mprintf (ev, "is choosing contact");
+    break;
+  }
+}
 
 void print_user_status (struct in_ev *ev, struct TdUserStatus *status) {
   switch ((enum List_UserStatus)status->ID) {
