@@ -208,7 +208,7 @@ struct tdcli_peer *peer_update_chat (struct TdChat *C) {
   PB.chat_id = C->id_;
   struct tdcli_peer *P = tree_lookup_chat_peer (tdcli_chats, &PB);
   if (!P) {
-    switch (C->type_->ID) {
+    switch ((enum List_ChatInfo)C->type_->ID) {    
     case CODE_PrivateChatInfo:
       {
         struct TdPrivateChatInfo *I = (void *)C->type_;
@@ -237,8 +237,8 @@ struct tdcli_peer *peer_update_chat (struct TdChat *C) {
         PB.peer_id = I->secret_chat_->id_;
       }
       break;
-    default:
-      assert (0);
+    //default:
+    //  assert (0);
     }
 
     P = tree_lookup_peer_chat (tdcli_peers, &PB);
@@ -262,7 +262,7 @@ struct tdcli_peer *peer_update_chat (struct TdChat *C) {
   }
   P->chat = C;
 
-  switch (C->type_->ID) {
+  switch ((enum List_ChatInfo)C->type_->ID) {
     case CODE_PrivateChatInfo:
       {        
         struct TdPrivateChatInfo *I = (void *)C->type_;
@@ -303,8 +303,8 @@ struct tdcli_peer *peer_update_chat (struct TdChat *C) {
         P->secret_chat = I->secret_chat_;
       }
       break;
-    default:
-      assert (0);
+    //default:
+    //  assert (0);
   }
 
   return P;
@@ -543,7 +543,7 @@ void on_secret_chat_update (struct TdSecretChat *S) {
 
 void on_chat_update (struct TdChat *C) {
   assert (C->ID == CODE_Chat);
-  switch (C->type_->ID) {
+  switch ((enum List_ChatInfo)C->type_->ID) {
   case CODE_PrivateChatInfo:
     {
       struct TdPrivateChatInfo *I = (void *)C->type_;
@@ -1824,7 +1824,7 @@ void do_chat_info (struct command *command, int arg_num, struct arg args[], stru
   struct TdChat *C = get_chat (args[2].chat_id);
 
   if (C) {    
-    switch (C->type_->ID) {
+    switch ((enum List_ChatInfo)C->type_->ID) {
       case CODE_PrivateChatInfo:
         {
           struct TdPrivateChatInfo *I = (void *)C->type_;
@@ -1843,6 +1843,7 @@ void do_chat_info (struct command *command, int arg_num, struct arg args[], stru
           TdCClientSendCommand(TLS, (void *)TdCreateObjectGetChannelFull (I->channel_->id_), tdcli_cb, cmd);
         }
         break;
+      case CODE_SecretChatInfo:
       default:
         assert (0);
     }
@@ -3122,7 +3123,7 @@ void open_filename_gw (struct in_command *cmd, struct TdNullaryObject *res) {
 }
 
 void print_member (struct in_ev *ev, struct TdChatMember *U) {
-  switch (U->status_->ID) {
+  switch ((enum List_ChatMemberStatus)U->status_->ID) {
     case CODE_ChatMemberStatusCreator:
       mprintf (ev, "Creator   ");
       break;
@@ -3400,7 +3401,7 @@ struct update_subscriber *subscribe_updates (void *extra, void (*on_update)(void
 
 void default_update_handler (void *arg, struct TdUpdate *Upd) {
   struct in_ev *ev = arg;
-  switch (Upd->ID) {
+  switch ((enum List_Update)Upd->ID) {
   case CODE_UpdateNewMessage:
     {
       struct TdUpdateNewMessage *U = (void *)Upd;
@@ -3506,7 +3507,7 @@ void do_update (struct TdUpdate *U) {
 }
 
 void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
-  switch (Upd->ID) {
+  switch ((enum List_Update)Upd->ID) {
   case CODE_UpdateNewMessage:
     {
       struct TdUpdateNewMessage *U = (void *)Upd;
@@ -3793,7 +3794,7 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
     break;
   case CODE_UpdateNewInlineCallbackQuery:
     break;
-  default:
+  /*default:
     {
       mprint_start (NULL);
       char *s = TdSerializeUpdate ((struct TdUpdate *)Upd);
@@ -3801,7 +3802,7 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
       free (s);
       mprint_end (NULL);
     }
-    break;
+    break;*/
   }
   do_update (Upd);
 }
@@ -5360,7 +5361,7 @@ tgl_peer_id_t last_from_user_id;
 tgl_peer_id_t last_to_id;
 
 void print_user_status (struct in_ev *ev, struct TdUserStatus *status) {
-  switch (status->ID) {
+  switch ((enum List_UserStatus)status->ID) {
   case CODE_UserStatusEmpty:
     mprintf (ev, "offline");
     break;
@@ -5683,6 +5684,13 @@ void print_contact (struct in_ev *ev, struct TdContact *C) {
   mprintf (ev, "]");
 }
 
+void print_game (struct in_ev *ev, struct TdGame *G) {
+  mprintf (ev, "[game %lld \"%s\"]", G->id_, G->title_);
+  if (G->text_) {
+    mprintf (ev, " %s", G->text_);
+  }
+}
+
 void print_message_animation (struct in_ev *ev, struct TdMessageAnimation *animation) {
   if (animation->caption_) {
     mprintf (ev, "%s ", animation->caption_);
@@ -5739,6 +5747,10 @@ void print_message_venue (struct in_ev *ev, struct TdMessageVenue *venue) {
 
 void print_message_contact (struct in_ev *ev, struct TdMessageContact *contact) {
   print_contact (ev, contact->contact_);
+}
+
+void print_message_game (struct in_ev *ev, struct TdMessageGame *game) {
+  print_game (ev, game->game_);
 }
 
 void print_message_text (struct in_ev *ev, struct TdMessageText *text) {
@@ -5810,7 +5822,7 @@ void print_message_pin_message (struct in_ev *ev, struct TdChat *C, struct TdMes
 }
 
 void print_message_game_score (struct in_ev *ev, struct TdMessageGameScore *act) {
-  mprintf (ev, "scored %d points in game %d", act->score_, act->game_id_);
+  mprintf (ev, "scored %d points in game %lld", act->score_, act->game_id_);
 }
 
 void print_message_unsupported (struct in_ev *ev, struct TdMessageUnsupported *act) {
@@ -5818,7 +5830,7 @@ void print_message_unsupported (struct in_ev *ev, struct TdMessageUnsupported *a
 }
 
 void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMessageContent *content) {
-  switch (content->ID) {
+  switch ((enum List_MessageContent)content->ID) {
   case CODE_MessageAnimation:
     return print_message_animation (ev, (void *)content);
   case CODE_MessageAudio:
@@ -5839,6 +5851,8 @@ void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMess
     return print_message_venue (ev, (void *)content);
   case CODE_MessageContact:
     return print_message_contact (ev, (void *)content);
+  case CODE_MessageGame:
+    return print_message_game (ev, (void *)content);
   case CODE_MessageText:
     return print_message_text (ev, (void *)content);
   case CODE_MessageGroupChatCreate:
@@ -5849,6 +5863,8 @@ void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMess
     return print_message_chat_change_title (ev, (void *)content);
   case CODE_MessageChatChangePhoto:
     return print_message_chat_change_photo (ev, (void *)content);
+  case CODE_MessageChatDeletePhoto:
+    return print_message_chat_delete_photo (ev, (void *)content);
   case CODE_MessageChatAddMembers:
     return print_message_chat_add_members (ev, (void *)content);
   case CODE_MessageChatJoinByLink:
@@ -5865,12 +5881,12 @@ void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMess
     return print_message_game_score (ev, (void *)content);
   case CODE_MessageUnsupported:
     return print_message_unsupported (ev, (void *)content);
-  default:
+  /*default:
     {
       char *s = TdSerializeMessageContent (content);
       logprintf ("Can not parse message media: %s\n", s);
       free (s);
-    }
+    }*/
   }
 }
 
@@ -5967,7 +5983,7 @@ void print_message (struct in_ev *ev, struct TdMessage *M) {
         struct TdInlineKeyboardButton *B = R->rows_->data[i]->data[j];
         mprintf (ev, "\n");
         mprintf (ev, "\tButton %d: %s", ++p, B->text_);
-        switch (B->type_->ID) {
+        switch ((enum List_InlineKeyboardButtonType)B->type_->ID) {
         case CODE_InlineKeyboardButtonTypeUrl:
           mprintf (ev, " <%s>", ((struct TdInlineKeyboardButtonTypeUrl *)B->type_)->url_);
           break;
@@ -5975,7 +5991,7 @@ void print_message (struct in_ev *ev, struct TdMessage *M) {
           mprintf (ev, " <callback>");
           break;
         case CODE_InlineKeyboardButtonTypeCallbackGame:
-          mprintf (ev, " <game %s>", ((struct TdInlineKeyboardButtonTypeCallbackGame *)B->type_)->title_);
+          mprintf (ev, " <game>");
           break;
         case CODE_InlineKeyboardButtonTypeSwitchInline:
           mprintf (ev, " <switch inline %s>", ((struct TdInlineKeyboardButtonTypeSwitchInline *)B->type_)->query_);

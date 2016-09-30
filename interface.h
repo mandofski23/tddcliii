@@ -78,6 +78,7 @@ void print_message (struct in_ev *ev, struct TdMessage *M);
 void print_message_id (struct in_ev *ev, struct TdChat *C, int id);
 void print_user_name (struct in_ev *ev, struct TdUser *U, int id);
 void print_chat_name (struct in_ev *ev, struct TdChat *C, long long id);
+void print_game (struct in_ev *ev, struct TdGame *G);
 void print_channel_name (struct in_ev *ev, struct TdChannel *C, int id);
 void print_user_status (struct in_ev *ev, struct TdUserStatus *S);
 /*void print_chat_name (struct in_ev *ev, tgl_peer_id_t id, tgl_peer_t *C);

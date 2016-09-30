@@ -23,7 +23,7 @@
 #define PROG_NAME "telegram-cli"
 #endif
 
-#define TELEGRAM_CLI_VERSION "1.5.0"
+#define TELEGRAM_CLI_VERSION "1.5.1"
 #define TELEGRAM_CLI_API_HASH "36722c72256a24c1225de00eb6a1ca74"
 #define TELEGRAM_CLI_API_ID 2899
  

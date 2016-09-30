@@ -358,11 +358,12 @@ void parse_config (void) {
     parse_config_val (&conf, &logname, "logname", 0, config_directory);
     printf ("I: logname = '%s'\n", logname);
     if (logname) {
-      int fd = open (logname, O_WRONLY | O_APPEND | O_CREAT);
+      int fd = open (logname, O_WRONLY | O_APPEND | O_CREAT, 0600);
       if (fd < 0) {
         logprintf ("Can not open logfile '%s': %m\n", logname);
+      } else {
+        assert (dup2 (fd, 2) == 2);
       }
-      assert (dup2 (fd, 2) == 2);
       close (fd);
     }
   }
