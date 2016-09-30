@@ -22,7 +22,7 @@ static int stack_pos;
 
 void tdcb_json_pack_string (const char *s) {
   assert (stack_pos < STACK_SIZE);
-  stack[stack_pos ++] = json_string (s);
+  stack[stack_pos ++] = json_string (s ? s : "");
 }
 
 void tdcb_json_pack_long (long long x) {
@@ -53,6 +53,7 @@ void tdcb_json_new_array (void) {
 void tdcb_json_new_field (const char *name) {
   assert (stack_pos >= 2);
   json_t *a = stack[--stack_pos];
+  assert (a);
   assert (json_object_set (stack[stack_pos - 1], name, a) >= 0);
 }
 
@@ -185,6 +186,9 @@ void json_universal_cb (struct in_command *cmd, struct TdNullaryObject *res) {
   TdStackStorerNullaryObject (res, &tdcb_json_storer_methods);
   
   assert (stack_pos == 1);
+  if (cmd->str_query_id) {
+    json_object_set (stack[0], "ARG", json_string (cmd->str_query_id));
+  }
   
   mprint_start (cmd->ev);
   char *s = json_dumps (stack[0], 0);
@@ -226,6 +230,14 @@ void json_interpreter_ex (struct in_command *cmd) {
     return;
   }
 
+  json_t *X = json_object_get (F, "ARG");
+  if (X) {
+    if (json_is_string (X)) {
+      cmd->str_query_id = strdup (json_string_value (X));
+    }
+    json_decref (X);
+  }
+
   assert (!stack_pos);
   stack[stack_pos ++] = F;
   assert (stack_pos == 1);
@@ -234,6 +246,7 @@ void json_interpreter_ex (struct in_command *cmd) {
   json_decref (stack[0]);
   stack_pos --;
 
+  cmd->refcnt ++;
   TdCClientSendCommand (TLS, T, tdcli_cb, cmd);
 }
 #endif

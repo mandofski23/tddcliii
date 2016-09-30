@@ -106,6 +106,7 @@ struct in_command {
   struct in_ev *ev;
   int refcnt;
   long long query_id;
+  char *str_query_id;
   long long chat_mode_chat_id;
   //struct tdl_chat_info *chat_mode_chat;
   struct command *cmd;
