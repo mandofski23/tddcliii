@@ -25,6 +25,11 @@ void tdcb_json_pack_string (const char *s) {
   stack[stack_pos ++] = json_string (s ? s : "");
 }
 
+void tdcb_json_pack_bytes (const unsigned char *s, int len) {
+  assert (stack_pos < STACK_SIZE);
+  stack[stack_pos ++] = json_stringn (s ? (char *)s : "", len);
+}
+
 void tdcb_json_pack_long (long long x) {
   assert (stack_pos < STACK_SIZE);
   stack[stack_pos ++] = json_integer (x);
@@ -98,6 +103,12 @@ char *tdcb_json_get_string (void) {
   return strdup (json_string_value (stack[stack_pos - 1]));
 }
 
+unsigned char *tdcb_json_get_bytes (int *len) {
+  assert (stack_pos >= 1);
+  *len = (int)json_string_length (stack[stack_pos - 1]);
+  return (unsigned char *)strdup (json_string_value (stack[stack_pos - 1]));
+}
+
 long long tdcb_json_get_long (void) {
   assert (stack_pos >= 1);
   return json_integer_value (stack[stack_pos - 1]);
@@ -137,6 +148,7 @@ int tdcb_json_get_arr_size (void) {
 
 struct TdStackStorerMethods tdcb_json_storer_methods = {
   .pack_string = tdcb_json_pack_string,
+  .pack_bytes = tdcb_json_pack_bytes,
   .pack_long = tdcb_json_pack_long,
   .pack_double = tdcb_json_pack_double,
   .pack_bool = tdcb_json_pack_bool,
@@ -149,6 +161,7 @@ struct TdStackStorerMethods tdcb_json_storer_methods = {
 struct TdStackFetcherMethods tdcb_json_fetcher_methods = {
   .is_nil = tdcb_json_is_nil,
   .get_string = tdcb_json_get_string,
+  .get_bytes = tdcb_json_get_bytes,
   .get_long = tdcb_json_get_long,
   .get_double = tdcb_json_get_double,
   .pop = tdcb_json_pop,

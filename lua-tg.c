@@ -70,6 +70,15 @@ void tdcb_lua_pack_string (const char *s) {
   }
 }
 
+void tdcb_lua_pack_bytes (const unsigned char *s, int len) {
+  my_lua_checkstack (1);
+  if (s) {
+    lua_pushlstring (luaState, (char *)s, len);
+  } else {
+    lua_pushboolean (luaState, 0);
+  }
+}
+
 void tdcb_lua_pack_long (long long x) {
   my_lua_checkstack (1);
   if (x == (int)x) {
@@ -117,6 +126,7 @@ void tdcb_lua_new_arr_field (int id) {
 
 struct TdStackStorerMethods tdcb_lua_storer_methods = {
   .pack_string = tdcb_lua_pack_string,
+  .pack_bytes = tdcb_lua_pack_bytes,
   .pack_long = tdcb_lua_pack_long,
   .pack_double = tdcb_lua_pack_double,
   .pack_bool = tdcb_lua_pack_bool,
@@ -153,6 +163,13 @@ int tdcb_lua_is_nil (void) {
 char *tdcb_lua_get_string (void) {
   const char *r = lua_tostring (luaState, -1);
   return r ? strdup (r) : NULL;
+}
+
+unsigned char *tdcb_lua_get_bytes (int *len) {
+  size_t l;
+  const char *r = lua_tolstring (luaState, -1, &l);
+  *len = (int)l;
+  return r ? (unsigned char *)strdup (r) : NULL;
 }
 
 long long tdcb_lua_get_long (void) {
@@ -195,6 +212,7 @@ int tdcb_lua_get_arr_size (void) {
 
 struct TdStackFetcherMethods tdcb_lua_fetcher_methods = {
   .get_string = tdcb_lua_get_string,
+  .get_bytes = tdcb_lua_get_bytes,
   .get_long = tdcb_lua_get_long,
   .get_double = tdcb_lua_get_double,
   .pop = tdcb_lua_pop,

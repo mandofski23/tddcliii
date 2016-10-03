@@ -56,7 +56,12 @@
 //#include "structures.h"
 
 #ifdef USE_LUA
+#  include <lua.h>
 #  include "lua-tg.h"
+#endif
+
+#ifdef HAVE_LIBCONFIG
+#include <libconfig.h>
 #endif
 
 
@@ -83,6 +88,8 @@
 #ifdef USE_JSON
 #include "json-tg.h"
 #endif
+
+#include "auto/git_info.h"
 
 #include "tree.h"
 
@@ -1508,8 +1515,31 @@ void do_main_session (struct command *command, int arg_num, struct arg args[], s
 }
 
 void do_version (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  static char *s = TELEGRAM_CLI_VERSION_STR;
-  
+  #define STR2(X) #X
+  #define STR(X) STR2(X)
+  //char *s = TELEGRAM_CLI_VERSION_STR;
+  char *s = "Telegram-cli " TELEGRAM_CLI_VERSION "\n"
+            "Uses tdlib version " GIT_COMMIT "\n"
+            #ifdef READLINE_GNU
+            "Uses libreadline " STR(RL_VERSION_MAJOR) "." STR(RL_VERSION_MINOR) "\n"
+            #else
+            "Uses libedit ????\n"
+            #endif
+            #ifdef USE_LUA
+            "Uses " LUA_VERSION "\n"
+            #endif
+            #ifdef USE_JSON
+            "Uses libjansson " JANSSON_VERSION "\n"
+            #endif
+            "Uses libevent " LIBEVENT_VERSION "\n"
+            #ifdef HAVE_LIBCONFIG
+            "Uses libconfig " STR(LIBCONFIG_VER_MAJOR) "." 
+                              STR(LIBCONFIG_VER_MINOR) "."
+                              STR(LIBCONFIG_VER_REVISION) "\n"
+            #endif
+            ;
+  #undef STR
+  #undef STR2
   
   struct TdTestString *result = TdCreateObjectTestString (s);
   tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);
@@ -1549,7 +1579,7 @@ void do_push_button (struct command *command, int arg_num, struct arg args[], st
             return;
           } else {
             struct TdInlineKeyboardButtonTypeCallback *C = (void *)B->type_;
-            TdCClientSendCommand(TLS, (void *)TdCreateObjectGetCallbackQueryAnswer (M->chat_id_, M->id_, (void *)TdCreateObjectCallbackQueryData (C->data_)), tdcli_cb, cmd);
+            TdCClientSendCommand(TLS, (void *)TdCreateObjectGetCallbackQueryAnswer (M->chat_id_, M->id_, (void *)TdCreateObjectCallbackQueryData (TdCreateObjectBytes (C->data_.data, C->data_.len))), tdcli_cb, cmd);
             return;
           }
         }
@@ -1703,7 +1733,7 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
     } else if (!strcmp (media_type, "video")) {
       content = (void *)TdCreateObjectInputMessageVideo ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0, 0, caption);
     } else if (!strcmp (media_type, "voice")) {
-      content = (void *)TdCreateObjectInputMessageVoice ((void *)TdCreateObjectInputFileLocal (file_name), 0, NULL, caption);
+      content = (void *)TdCreateObjectInputMessageVoice ((void *)TdCreateObjectInputFileLocal (file_name), 0, TdCreateObjectBytes (NULL, 0), caption);
     } else {
       fail_interface (TLS, cmd, EINVAL, "Unknown media type");
       return;
@@ -4797,6 +4827,12 @@ void print_send_message_action (struct in_ev *ev, struct TdSendMessageAction *ac
     break;
   case CODE_SendMessageChooseContactAction:
     mprintf (ev, "is choosing contact");
+    break;
+  case CODE_SendMessageStartPlayGameAction:
+    mprintf (ev, "started to play game");
+    break;
+  case CODE_SendMessageStopPlayGameAction:
+    mprintf (ev, "stopped playing game");
     break;
   }
 }
