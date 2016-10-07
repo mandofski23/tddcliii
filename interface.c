@@ -3452,6 +3452,12 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
     }
     break;
   case CODE_UpdateMessageSendFailed:
+    {
+      struct TdUpdateMessageSendFailed *U = (void *)Upd;
+      mprint_start (ev);
+      mprintf (ev, "Failed to send message error %d: %s\n", U->error_code_, U->error_message_);
+      mprint_end (ev);
+    }
     break;
   case CODE_UpdateMessageContent:
     break;
@@ -3493,9 +3499,13 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
         print_user_name (ev, NULL, U->user_id_);
         mprintf (ev, " is now ");
         print_send_message_action (ev, U->action_);
+
         if (U->chat_id_) {
-          mprintf (ev, " is chat ");
-          print_chat_name (ev, NULL, U->chat_id_);
+          struct TdChat *C = get_chat (U->chat_id_);
+          if (!C || C->type_->ID != CODE_PrivateChatInfo) {
+            mprintf (ev, " in chat ");
+            print_chat_name (ev, C, U->chat_id_);
+          }
         }
         mprintf (ev, "\n");
         mpop_color (ev);
