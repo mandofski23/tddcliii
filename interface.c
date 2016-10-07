@@ -1256,6 +1256,7 @@ char *modifiers[] = {
   "[enable_preview]",
   "[disable_preview]",
   "[html]",
+  "[markdown]",
   "[reply=",
   "[id=",
   0
@@ -1645,6 +1646,7 @@ void do_msg (struct command *command, int arg_num, struct arg args[], struct in_
 
   char *text = args[3].str;
   int do_html = (int)find_modifier (args[0].vec_len, args[0].vec, "html", 0);
+  int do_markdown = (int)find_modifier (args[0].vec_len, args[0].vec, "markdown", 0);
 
   int disable_preview = disable_msg_preview;
   if (disable_preview) {
@@ -1659,7 +1661,7 @@ void do_msg (struct command *command, int arg_num, struct arg args[], struct in_
 
   assert (do_html == 0 || do_html == 1);
 
-  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageText (text, disable_preview, 1, (void *)TdCreateObjectVectorNullaryObject (0, NULL));
+  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageText (text, disable_preview, 1, (void *)TdCreateObjectVectorNullaryObject (0, NULL), do_html ? (void *)TdCreateObjectTextParseModeHTML () : do_markdown ? (void *)TdCreateObjectTextParseModeMarkdown () : NULL);
   TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
 }
 

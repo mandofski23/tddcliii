@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 2.8)
 
 set (CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
 
-add_subdirectory("td/libtd/src/main/jni")
-include_directories ("td/libtd/src/main/jni")
+add_subdirectory("td/")
+include_directories ("td/")
 
 #find_package (libevent)
 find_package(LibConfig)
