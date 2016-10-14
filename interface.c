@@ -951,14 +951,16 @@ int hex2int (char c) {
   return 0;
 }
 
-char *print_permanent_msg_id (tdl_message_id_t id) {
+char *print_permanent_msg_id (tdl_message_id_t id) {  
   static char buf[2 * sizeof (tdl_message_id_t) + 1];
-  
+  sprintf (buf, "%d", id.message_id);
+  /* 
   unsigned char *s = (void *)&id;
   int i;
   for (i = 0; i < (int)sizeof (tdl_message_id_t); i++) {
     sprintf (buf + 2 * i, "%02x", (unsigned)s[i]);
   }
+  */
   return buf;
 }
 
@@ -1095,7 +1097,11 @@ long long cur_token_peer (char *s, enum tdcli_chat_type mode, struct in_command 
   if (A) {
     if (A->peer->chat) {
       if (mode == tdcli_any || mode == A->peer->peer_type) {
-        return A->peer->chat_id;
+        if (mode == tdcli_any) {
+          return A->peer->chat_id;
+        } else {
+          return A->peer->peer_id;
+        }
       } else {
         return NOT_FOUND;
       }
@@ -5381,7 +5387,11 @@ void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMess
 
 
 void print_message_id (struct in_ev *ev, struct TdChat *C, int id) {
-  mprintf (ev, "%d", convert_global_to_local (C->id_, id)->local_id);
+  if (permanent_msg_id_mode) {
+    mprintf (ev, "%d", id);
+  } else {
+    mprintf (ev, "%d", convert_global_to_local (C->id_, id)->local_id);
+  }
 }
 
 void print_message (struct in_ev *ev, struct TdMessage *M) {
