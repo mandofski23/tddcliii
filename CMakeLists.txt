@@ -4,6 +4,7 @@ set (CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
 
 add_subdirectory("td/")
 include_directories ("td/")
+include_directories ("td/td/generate/")
 
 #find_package (libevent)
 find_package(LibConfig)
