@@ -206,6 +206,7 @@ int tdcb_lua_get_arr_size (void) {
     int b = lua_isnil (luaState, -1);
     lua_pop (luaState, 1);
     if (b) { break; }
+    pos ++;
   }
   return pos;
 }
