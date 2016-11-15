@@ -2422,13 +2422,13 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"resolve_username", {{"username", ca_string}}, {{"chat", ra_chat}}, do_resolve_username, print_chat_gw, "Find chat by username", NULL, {}},
   
   {"reply", {{"msg_id", ca_msg_id}, {"text", ca_msg_string_end}}, {{"message", ra_message}}, do_msg, print_msg_success_gw, "Sends text message to peer", NULL, {1}},  
-  {"reply_file", {{"msg_id", ca_msg_id}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, {{"message", ra_message}}, do_send_file, print_msg_success_gw, "Replies to peer with file", NULL, {1}},
+  {"reply_file", {{"msg_id", ca_msg_id}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, {{"message", ra_message}}, do_send_file, print_msg_success_gw, "Replies to peer with file. type=[animation|audio|document|photo|sticker|video|voice]", NULL, {1}},
   {"reply_fwd", {{"msg_id", ca_msg_id}, {"fwd_id", ca_msg_id}}, {{"message", ra_message}}, do_fwd, print_msg_success_gw, "Forwards message to peer. Forward to secret chats is forbidden", NULL, {1}},
   {"reply_location", {{"msg_id", ca_msg_id}, {"longitude", ca_double}, {"latitude", ca_double}}, {{"message", ra_message}}, do_send_location, print_msg_success_gw, "Sends geo location", NULL, {1}},  
   
   {"search", {{"chat", ca_chat | ca_optional}, {"limit", ca_number | ca_optional}, {"from", ca_number | ca_optional}, {"to", ca_number | ca_optional}, {"offset", ca_number | ca_optional}, {"query", ca_string_end}}, {{"messages", ra_message | ra_vector}}, do_search, print_msg_list_gw, "Search for pattern in messages from date from to date to (unixtime) in messages with peer (if peer not present, in all messages)", NULL, {}},
   
-  {"send_file", {{"chat", ca_chat}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, {{"message", ra_message}}, do_send_file, print_msg_success_gw, "Sends file to peer", NULL, {0}},
+  {"send_file", {{"chat", ca_chat}, {"type", ca_media_type | ca_optional}, {"file", ca_file_name}, {"caption", ca_string_end | ca_optional}}, {{"message", ra_message}}, do_send_file, print_msg_success_gw, "Sends file to peer. type=[animation|audio|document|photo|sticker|video|voice]", NULL, {0}},
   {"send_location", {{"chat", ca_chat}, {"longitude", ca_double}, {"latitude", ca_double}}, {{"message", ra_message}}, do_send_location, print_msg_success_gw, "Sends geo location", NULL, {0}},
   {"send_typing", {{"chat", ca_chat}, {"action", ca_string | ca_optional}, {"progress", ca_number | ca_optional}}, {}, do_send_typing, print_success_gw, "Sends typing action action=[typing|cancel|record_video|upload_video|record_voice|upload_voice|upload_photo|upload_document|choose_location|choose_contact]", NULL, {}},
   
