@@ -233,8 +233,8 @@ void lua_universal_cb (struct in_command *cmd, struct TdNullaryObject *res) {
   
   TdStackStorerNullaryObject (res, &tdcb_lua_storer_methods);
 
-  int res = (lua_gettop (luaState));
-  assert (res == 3);
+  int stack_size = (lua_gettop (luaState));
+  assert (stack_size == 3);
 
   int r = ps_lua_pcall (luaState, 2, 0, 0);
 
