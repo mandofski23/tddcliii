@@ -4849,9 +4849,6 @@ void print_send_message_action (struct in_ev *ev, struct TdSendMessageAction *ac
   case CODE_SendMessageStartPlayGameAction:
     mprintf (ev, "started to play game");
     break;
-  case CODE_SendMessageStopPlayGameAction:
-    mprintf (ev, "stopped playing game");
-    break;
   }
 }
 
@@ -5052,10 +5049,10 @@ void print_document (struct in_ev *ev, struct TdDocument *document) {
 
 void print_photo (struct in_ev *ev, struct TdPhoto *photo) {
   mprintf (ev, "[photo");
-  if (photo->photos_->len > 0) {
+  if (photo->sizes_->len > 0) {
     int j;
-    for (j = 0; j < photo->photos_->len; j++) {
-      struct TdPhotoSize *t = photo->photos_->data[j];
+    for (j = 0; j < photo->sizes_->len; j++) {
+      struct TdPhotoSize *t = photo->sizes_->data[j];
       if (t->width_ != 0 || t->height_ != 0) {
         mprintf (ev, " [photo_size %d size=%dx%d]", t->photo_->id_, t->width_, t->height_);
       }

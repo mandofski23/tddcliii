@@ -423,7 +423,7 @@ void on_got_auth_state (void *TLS, void *extra, struct TdNullaryObject *res) {
     auth_state = res->ID;
     if (res->ID == CODE_AuthStateWaitPassword) {
       struct TdAuthStateWaitPassword *w = (void *)res;
-      hint = w->hint_ ? strdup (w->hint_) : NULL;
+      hint = w->password_hint_ ? strdup (w->password_hint_) : NULL;
     }
   }
 
