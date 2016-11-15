@@ -59,13 +59,15 @@ void tdcb_json_new_field (const char *name) {
   assert (stack_pos >= 2);
   json_t *a = stack[--stack_pos];
   assert (a);
-  assert (json_object_set (stack[stack_pos - 1], name, a) >= 0);
+  int res = json_object_set (stack[stack_pos - 1], name, a);
+  assert (res >= 0);
 }
 
 void tdcb_json_new_arr_field (int id) {
   assert (stack_pos >= 2);
   json_t *a = stack[--stack_pos];
-  assert (json_array_append (stack[stack_pos - 1], a) >= 0);
+  int res = json_array_append (stack[stack_pos - 1], a);
+  assert (res >= 0);
 }
 
 int tdcb_json_is_string (void) {

@@ -93,6 +93,7 @@
 
 #include "tree.h"
 
+int allocated_commands;
 
 extern struct event_base *ev_base;
 
@@ -684,6 +685,9 @@ void in_command_decref (struct in_command *cmd) {
     }
     
     free (cmd);
+
+    allocated_commands --;
+    logprintf ("allocated_commands = %d\n", allocated_commands);
   }
 }
 
@@ -1061,7 +1065,6 @@ void proceed_with_query (struct delayed_query *q) {
 
 void stop_query (struct delayed_query *q, int error_code, char *error) {
   fail_interface (TLS, q->cmd, error_code, "Fail to resolve chat: %s", error);
-  in_command_decref (q->cmd);
   
   if (q->token) {
     free (q->token);
@@ -2795,6 +2798,8 @@ void fail_interface (void *TLS, struct in_command *cmd, int error_code, const ch
   }
   mprintf (cmd->ev, "FAIL: %d: %s\n", error_code, error);
   mprint_end (cmd->ev);
+
+  in_command_decref (cmd);
 }
 
 void print_success (struct in_command *cmd) {
@@ -4377,6 +4382,7 @@ void interpreter_ex (struct in_command *cmd) {
   memset (&args, 0, sizeof (args));
 
 
+  cmd->refcnt ++;
   int res = parse_command_line (args, cmd, 0);
 
   if (!res) {
@@ -4394,15 +4400,16 @@ void interpreter_ex (struct in_command *cmd) {
     if (!count) { count = 1; }
     cmd->cmd = command;
 
-    #ifdef USE_JSON
-    cmd->cb = enable_json ? json_universal_cb : command->default_cb;    
-    #else
-    cmd->cb = command->default_cb;    
-    #endif
-    cmd->refcnt ++;
+    if (!cmd->cb) {
+      #ifdef USE_JSON
+      cmd->cb = enable_json ? json_universal_cb : command->default_cb;    
+      #else
+      cmd->cb = command->default_cb;    
+      #endif
+    }
     command->fun (command, 12, args, cmd);
   }
-  
+
   free_args_list (args, 12);
 
   update_prompt ();
@@ -4418,6 +4425,7 @@ void interpreter (char *line) {
   cmd->line = strdup (line);
   cmd->chat_mode_chat_id = cur_chat_mode_chat_id;
   cmd->refcnt = 1;
+  allocated_commands ++;
   in_readline = 1;
   interpreter_ex (cmd);
   in_readline = 0;
@@ -5519,7 +5527,8 @@ void set_interface_callbacks (void) {
   #ifdef READLINE_GNU
   rl_filename_quote_characters = strdup (" ");
   #else
-  assert (rl_initialize () >= 0);
+  int res = rl_initialize ();
+  assert (res >= 0);
   #endif
   rl_basic_word_break_characters = strdup (" ");
   

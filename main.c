@@ -362,7 +362,8 @@ void parse_config (void) {
       if (fd < 0) {
         logprintf ("Can not open logfile '%s': %m\n", logname);
       } else {
-        assert (dup2 (fd, 2) == 2);
+        int r = dup2 (fd, 2);
+        assert (r == 2);
       }
       close (fd);
     }
@@ -897,7 +898,8 @@ int main (int argc, char **argv) {
     if (fd < 0) {
       logprintf ("Can not open logfile '%s': %m\n", logname);
     }
-    assert (dup2 (fd, 2) == 2);
+    int r = dup2 (fd, 2);
+    assert (r == 2);
     close (fd);
   }
 

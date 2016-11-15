@@ -35,6 +35,7 @@
 #endif
 lua_State *luaState;
 extern void *TLS;
+extern int allocated_commands;
 
 //#include "interface.h"
 //#include"auto/constants.h"
@@ -59,7 +60,7 @@ int ps_lua_pcall (lua_State *l, int a, int b, int c) {
   return r;
 }
 
-#define my_lua_checkstack(x) assert (lua_checkstack (luaState, x))
+#define my_lua_checkstack(x) lua_checkstack (luaState, x)
 
 void tdcb_lua_pack_string (const char *s) {
   my_lua_checkstack (1);
@@ -232,7 +233,8 @@ void lua_universal_cb (struct in_command *cmd, struct TdNullaryObject *res) {
   
   TdStackStorerNullaryObject (res, &tdcb_lua_storer_methods);
 
-  assert (lua_gettop (luaState) == 3);
+  int res = (lua_gettop (luaState));
+  assert (res == 3);
 
   int r = ps_lua_pcall (luaState, 2, 0, 0);
 
@@ -273,13 +275,16 @@ int lua_parse_function (lua_State *L) {
   e->func = a2;
   e->param = a1;
 
+  allocated_commands ++;
   struct in_command *cmd = calloc (sizeof (*cmd), 1);
   cmd->cb = lua_universal_cb;
   cmd->extra = e;
 
-  assert (lua_gettop (L) == 1);
+  int res = lua_gettop (L);
+  assert (res == 1);
   struct TdFunction *T = TdStackFetcherFunction (&tdcb_lua_fetcher_methods);
-  assert (lua_gettop (L) == 1);
+  res = lua_gettop (L);
+  assert (res == 1);
   lua_pop (luaState, 1);
 
   TdCClientSendCommand (TLS, T, tdcli_cb, cmd);
