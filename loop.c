@@ -462,6 +462,8 @@ void on_got_auth_state (void *TLS, void *extra, struct TdNullaryObject *res) {
     do_get_string (TLS, "password: ", 1);
     break;
   case CODE_AuthStateOk:
+    //authorization_success ();
+    break;
   case CODE_AuthStateLoggingOut:
     break;
   default:

@@ -176,6 +176,12 @@ struct TdChat *get_peer_chat (int peer_type, int peer_id) {
   return P ? P->chat : NULL;
 }
 
+struct tdcli_peer *get_peer (long long chat_id) {
+  struct tdcli_peer PB;
+  PB.chat_id = chat_id;
+  return tree_lookup_chat_peer (tdcli_chats, &PB);
+}
+
 struct TdUser *get_user (int user_id) { 
   struct tdcli_peer PB;
   PB.peer_type = CODE_User;
@@ -687,7 +693,6 @@ void in_command_decref (struct in_command *cmd) {
     free (cmd);
 
     allocated_commands --;
-    logprintf ("allocated_commands = %d\n", allocated_commands);
   }
 }
 
@@ -2094,6 +2099,22 @@ void do_channel_edit (struct command *command, int arg_num, struct arg args[], s
   }
 }
 
+void do_pin_message (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
+  long long chat_id = args[2].msg_id.chat_id;
+  int msg_id = args[2].msg_id.message_id;
+ 
+  struct tdcli_peer *P = get_peer (chat_id);
+
+  if (!P || P->peer_type != CODE_Channel) {
+    fail_interface (TLS, cmd, EINVAL, "message must be in supergroup");
+    return;
+  }
+
+  int channel_id = P->peer_id;
+    
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectPinChannelMessage (channel_id, msg_id, 1), tdcli_cb, cmd);  
+}
+
 /* }}} */
 
 /* {{{ WORKING WITH DIALOG LIST */
@@ -2419,6 +2440,7 @@ struct command commands[MAX_COMMANDS_SIZE] = {
   {"msg", {{"chat", ca_chat}, {"text", ca_msg_string_end}}, {{"message", ra_message}}, do_msg, print_msg_success_gw, "Sends text message to peer", NULL, {0}},
   {"mute", {{"chat", ca_chat}, {"mute_for", ca_number}}, {}, do_mute, print_success_gw, "mutes chat for specified number of seconds (default 60)", NULL, {1}},
 
+  {"pin_message", {{"message", ca_msg_id}}, {}, do_pin_message, print_success_gw, "Tries to push inline button", NULL, {}},
   {"push_button", {{"message", ca_msg_id}, {"button_id", ca_number}}, {}, do_push_button, print_callback_answer_gw, "Tries to push inline button", NULL, {}},
   
 
@@ -5317,7 +5339,7 @@ void print_message_chat_migrate_from (struct in_ev *ev, struct TdMessageChatMigr
 }
 
 void print_message_pin_message (struct in_ev *ev, struct TdChat *C, struct TdMessagePinMessage *act) {
-  mprintf (ev, "pinned message");
+  mprintf (ev, "pinned message ");
   print_message_id (ev, C, act->message_id_);
 }
 
