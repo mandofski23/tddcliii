@@ -3580,7 +3580,7 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
     break;
   case CODE_UpdateUserBlocked:
     break;
-  case CODE_UpdateNewAuthorization:
+  /*case CODE_UpdateNewAuthorization:
     if ((!disable_output || arg) && log_level >= 0) {       
       struct TdUpdateNewAuthorization *U = (void *)Upd;
       mprint_start (ev);
@@ -3594,7 +3594,7 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
 
       mprint_end (ev);
     }
-    break;
+    break;*/
   case CODE_UpdateFileProgress:
     break;
   case CODE_UpdateFile:
@@ -3612,6 +3612,20 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateNewCallbackQuery:
     break;
   case CODE_UpdateNewInlineCallbackQuery:
+    break;
+  case CODE_UpdateServiceNotification:
+    {
+      struct TdUpdateServiceNotification *U = (void *)Upd;
+      mprint_start (ev);
+      mpush_color (ev, COLOR_REDB);
+      mprintf (ev, "Service notification: type=%s ", U->type_);
+      print_message_content (ev, NULL, U->content_);
+      mprintf (ev, "\n");
+      mpop_color (ev);
+      mprint_end (ev);
+    }
+    break;
+  case CODE_UpdatePrivacy:
     break;
   }
 }
@@ -3867,8 +3881,8 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
       }
     }
     break;
-  case CODE_UpdateNewAuthorization:
-    break;
+  //case CODE_UpdateNewAuthorization:
+  //  break;
   case CODE_UpdateFileProgress:
     break;
   case CODE_UpdateFile:
@@ -3919,6 +3933,10 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateNewCallbackQuery:
     break;
   case CODE_UpdateNewInlineCallbackQuery:
+    break;
+  case CODE_UpdateServiceNotification:
+    break;
+  case CODE_UpdatePrivacy:
     break;
   /*default:
     {
