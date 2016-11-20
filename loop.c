@@ -276,7 +276,7 @@ static void read_incoming (struct bufferevent *bev, void *_arg) {
       if (ev->in_buf[pos] == '\n') {
         if (!ev->error) {
           ev->in_buf[pos] = 0;
-          struct in_command *cmd = malloc (sizeof (*cmd));
+          struct in_command *cmd = calloc (sizeof (*cmd), 1);
           cmd->ev = ev;
           ev->refcnt ++;
           cmd->line = strdup (ev->in_buf);
