@@ -93,6 +93,23 @@
 
 #include "tree.h"
 
+struct pending_message {
+  long long chat_id;
+  int id;
+  struct in_command *cmd;
+};
+
+static inline int pending_message_cmp (struct pending_message *a, struct pending_message *b) {
+  if (a->id < b->id) { return -1; }
+  if (a->id > b->id) { return 1; }
+  if (a->chat_id < b->chat_id) { return -1; }
+  if (a->chat_id > b->chat_id) { return 1; }
+  return 0;
+}
+
+DEFINE_TREE (pending_message, struct pending_message *, pending_message_cmp, NULL);
+struct tree_pending_message *pending_messages;
+
 int allocated_commands;
 
 extern struct event_base *ev_base;
@@ -2849,7 +2866,28 @@ void print_success_gw (struct in_command *cmd, struct TdNullaryObject *res) {
 }
 
 void print_msg_success_gw (struct in_command *cmd, struct TdNullaryObject *res) {
-  print_success_gw (cmd, res);
+  if (res->ID == CODE_Error) {
+    print_success_gw (cmd, res);
+  } else {
+    assert (res->ID == CODE_Message);
+    struct TdMessage *M = (void *)res;
+    assert (M->send_state_->ID == CODE_MessageIsBeingSent);
+    
+    struct pending_message Q;
+    Q.chat_id = M->chat_id_;
+    Q.id = M->id_;
+    assert (!tree_lookup_pending_message (pending_messages, &Q));
+
+    struct pending_message *P = malloc (sizeof (*P));
+    P->chat_id = M->chat_id_;
+    P->id = M->id_;
+    P->cmd = cmd;
+    if (cmd) {
+      cmd->refcnt ++;
+    }
+
+    pending_messages = tree_insert_pending_message (pending_messages, P, rand ());
+  }
 }
 
 void print_msg_list_gw (struct in_command *cmd, struct TdNullaryObject *res) {
@@ -3481,18 +3519,42 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
     break;
   case CODE_UpdateMessageSendSucceeded:
     {
-      struct TdUpdateNewMessage *U = (void *)Upd;
+      struct TdUpdateMessageSendSucceeded *U = (void *)Upd;
       mprint_start (ev);
       print_message (ev, U->message_);
       mprint_end (ev);
+
+      struct pending_message Q;
+      Q.chat_id = U->message_->chat_id_;
+      Q.id = U->old_message_id_; 
+      struct pending_message *P = tree_lookup_pending_message (pending_messages, &Q);
+      
+      assert (P);
+      if (P) {
+        print_success (P->cmd);
+        logprintf ("refcnt = %d\n", P->cmd->refcnt);
+        in_command_decref (P->cmd);
+        pending_messages = tree_delete_pending_message (pending_messages, P);
+        free (P);
+      }
     }
     break;
   case CODE_UpdateMessageSendFailed:
     {
       struct TdUpdateMessageSendFailed *U = (void *)Upd;
-      mprint_start (ev);
-      mprintf (ev, "Failed to send message error %d: %s\n", U->error_code_, U->error_message_);
-      mprint_end (ev);
+      struct pending_message Q;
+      Q.chat_id = U->chat_id_;
+      Q.id = U->message_id_; 
+      struct pending_message *P = tree_lookup_pending_message (pending_messages, &Q);
+
+      if (P) {
+        struct TdError *E = TdCreateObjectError (U->error_code_, U->error_message_);
+        print_fail (P->cmd, E);
+        TdDestroyObjectError (E);
+        in_command_decref (P->cmd);
+        pending_messages = tree_delete_pending_message (pending_messages, P);
+        free (P);
+      }
     }
     break;
   case CODE_UpdateMessageContent:
