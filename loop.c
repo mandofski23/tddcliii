@@ -70,6 +70,8 @@ int write_pipe;
 extern int verbosity;
 extern int readline_disabled;
 extern char *bot_hash;
+extern int allocated_commands;
+extern int wait_dialog_list;
 
 extern int bot_mode;
 
@@ -340,6 +342,8 @@ void on_started (void *TLS) {
   if (start_command) {
     safe_quit = 1;
     while (*start_command) {
+      allocated_commands ++;
+        
       char *start = start_command;
       while (*start_command && *start_command != '\n') {
         start_command ++;
@@ -350,6 +354,7 @@ void on_started (void *TLS) {
       } 
 
       struct in_command *cmd = malloc (sizeof (*cmd));
+      memset (cmd, 0, sizeof (struct in_command));
       cmd->refcnt = 1;
       cmd->line = strdup (start);
       cmd->chat_mode_chat_id = 0;
@@ -411,6 +416,19 @@ void on_got_unknown_cb (evutil_socket_t fd, short what, void *arg) {
   TdCClientSendCommand (TLS, (void *)TdCreateObjectGetAuthState (), on_got_auth_state, arg);
 }
 
+void got_dialog_list_cb (void *instance, void *extra, struct TdNullaryObject *result) {
+  assert (!extra);
+  assert (result);
+
+  if (result->ID == CODE_Error) {
+    char *s = TdSerializeNullaryObject (result);
+    logprintf ("%s\n", s);
+    free (s);
+  }
+
+  on_started (TLS);
+}
+
 void on_got_auth_state (void *TLS, void *extra, struct TdNullaryObject *res) {
   if (res->ID == CODE_Error) {
     struct TdError *error = (void *)res;
@@ -462,6 +480,11 @@ void on_got_auth_state (void *TLS, void *extra, struct TdNullaryObject *res) {
     do_get_string (TLS, "password: ", 1);
     break;
   case CODE_AuthStateOk:
+    if (wait_dialog_list) {
+      TdCClientSendCommand(TLS, (void *)TdCreateObjectGetChats ((1ull << 63) - 1, 0, 10), got_dialog_list_cb, NULL);  
+    } else {
+      on_started (TLS);
+    }
     //authorization_success ();
     break;
   case CODE_AuthStateLoggingOut:

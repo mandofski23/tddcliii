@@ -279,6 +279,7 @@ int lua_parse_function (lua_State *L) {
   struct in_command *cmd = calloc (sizeof (*cmd), 1);
   cmd->cb = lua_universal_cb;
   cmd->extra = e;
+  cmd->refcnt = 1;
 
   int res = lua_gettop (L);
   assert (res == 1);

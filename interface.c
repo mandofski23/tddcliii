@@ -101,6 +101,7 @@ int total_unread;
 int disable_msg_preview;
 int my_id;
 int need_prompt_update;
+int safe_quit;
 
 char *conn_state;
 
@@ -693,6 +694,12 @@ void in_command_decref (struct in_command *cmd) {
     free (cmd);
 
     allocated_commands --;
+
+    if (!allocated_commands && safe_quit) {
+      do_halt (0);
+    }
+  } else {
+    assert (cmd->refcnt > 0);
   }
 }
 
@@ -711,7 +718,6 @@ extern int alert_sound;
 extern int binlog_read;
 extern char *home_directory;
 
-int safe_quit;
 
 int in_readline;
 int readline_active;
@@ -1120,7 +1126,6 @@ long long cur_token_peer (char *s, enum tdcli_chat_type mode, struct in_command 
         return NOT_FOUND;       
       }
       struct delayed_query *q = calloc (sizeof (*q), 1);
-      cmd->refcnt ++;
       q->cmd = cmd;
       q->action = 1;
       q->mode = mode;
@@ -1152,7 +1157,6 @@ long long cur_token_peer (char *s, enum tdcli_chat_type mode, struct in_command 
   
   if (*s == '@' && cur_token_len >= 2) {
     struct delayed_query *q = calloc (sizeof (*q), 1);
-    cmd->refcnt ++;
     q->cmd = cmd;
     q->action = 2;
     q->mode = mode;
@@ -1173,7 +1177,6 @@ long long cur_token_peer (char *s, enum tdcli_chat_type mode, struct in_command 
       if (id != 0) {
         struct delayed_query *q = calloc (sizeof (*q), 1);
         q->action = 4;
-        cmd->refcnt ++;
         q->cmd = cmd;
 
         switch (ff[i]) {
@@ -1365,7 +1368,7 @@ void tdcli_cb (void *instance, void *extra, struct TdNullaryObject *result) {
   struct in_command *cmd = extra;
   assert (cmd->cb);
   cmd->cb (cmd, result);
-    
+  
   in_command_decref (cmd);
 }
 
@@ -1449,8 +1452,10 @@ void do_help (struct command *command, int arg_num, struct arg args[], struct in
     p += snprintf (s + p, BL - p, "Unknown command '%s'\n", command_name);
     if (p > BL) { p = BL; }
   }
-
+  
   struct TdTestString *result = TdCreateObjectTestString (s);
+  assert (result);
+  assert (result->refcnt == 1);
   tdcli_cb (TLS, cmd, (struct TdNullaryObject *)result);
   TdDestroyObjectTestString (result);
   #undef BL
@@ -2127,8 +2132,6 @@ void do_dialog_list (struct command *command, int arg_num, struct arg args[], st
 }
 
 void do_resolve_username (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
-  cmd->refcnt ++;
-  
   char *u = args[2].str;
   if (*u == '@') { u ++; }
   
@@ -3118,7 +3121,7 @@ void print_string_gw (struct in_command *cmd, struct TdNullaryObject *res) {
     print_fail (cmd, (struct TdError *)res);
     return;
   }
- 
+
   assert (res->ID == CODE_TestString);
   struct TdTestString *S = (void *)res;
 
@@ -3411,8 +3414,6 @@ void interpreter_chat_mode (struct in_command *cmd) {
     return;
   }
   if (!strncmp (line, "/history", 8)) {
-    cmd->refcnt ++;
-
     int limit = 40;
     sscanf (line, "/history %99d", &limit);
     if (limit < 0 || limit > 1000) { limit = 40; }
@@ -4584,7 +4585,9 @@ void logprintf (const char *format, ...) {
   va_end (ap);
 
   double T = (double)time (0);
-  fprintf (stderr, " *** %.6lf %s\n", T, log_buf);
+  mprint_start (notify_ev);
+  mprintf (notify_ev, " *** %.6lf %s\n", T, log_buf);
+  mprint_end (notify_ev);
 }
 
 int color_stack_pos;
