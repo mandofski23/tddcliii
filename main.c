@@ -778,9 +778,6 @@ void sig_term_handler (int signum __attribute__ ((unused))) {
 
 void do_halt (int error) {
   int retval;
-  if (daemonize) {
-    return;
-  }
 
   if (!readline_disabled) {
     rl_free_line_state ();
@@ -801,6 +798,8 @@ void do_halt (int error) {
   if (sfd > 0) {
     close (sfd);
   }
+
+  TdCClientDestroy (TLS);
  
   if (exit_code) {
     retval = exit_code;
