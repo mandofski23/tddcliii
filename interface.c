@@ -3529,7 +3529,6 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
       Q.id = U->old_message_id_; 
       struct pending_message *P = tree_lookup_pending_message (pending_messages, &Q);
       
-      assert (P);
       if (P) {
         print_success (P->cmd);
         logprintf ("refcnt = %d\n", P->cmd->refcnt);
