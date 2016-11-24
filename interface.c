@@ -1765,9 +1765,9 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
     } else if (!strcmp (media_type, "document")) {
       content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), NULL, caption);
     } else if (!strcmp (media_type, "photo")) {
-      content = (void *)TdCreateObjectInputMessagePhoto ((void *)TdCreateObjectInputFileLocal (file_name), caption);
+      content = (void *)TdCreateObjectInputMessagePhoto ((void *)TdCreateObjectInputFileLocal (file_name), 0, 0, caption);
     } else if (!strcmp (media_type, "sticker")) {
-      content = (void *)TdCreateObjectInputMessageSticker ((void *)TdCreateObjectInputFileLocal (file_name), NULL);
+      content = (void *)TdCreateObjectInputMessageSticker ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0);
     } else if (!strcmp (media_type, "video")) {
       content = (void *)TdCreateObjectInputMessageVideo ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0, 0, caption);
     } else if (!strcmp (media_type, "voice")) {
@@ -5180,7 +5180,6 @@ void print_sticker (struct in_ev *ev, struct TdSticker *sticker) {
     mprintf (ev, " emoji=%s", sticker->emoji_);
   }
   mprintf (ev, " set_id=%lld", sticker->set_id_);
-  mprintf (ev, " rating=%.3lf", sticker->rating_);
   if (sticker->width_ && sticker->height_) {
     mprintf (ev, " size=%dx%d", sticker->width_, sticker->height_);
   }
