@@ -103,6 +103,7 @@ char *logname;
 
 
 int bot_mode;
+char *bot_hash;
 int verbosity;
 int msg_num_mode;
 int log_level;
@@ -337,6 +338,19 @@ void parse_config (void) {
     strcpy (buf + l, "msg_num");
     config_lookup_bool (&conf, buf, &msg_num_mode);
   }
+
+  if (!bot_mode) {
+    strcpy (buf + l, "bot");
+    config_lookup_bool (&conf, buf, &bot_mode);
+  }
+
+  if (bot_mode && !bot_hash) {
+    strcpy (buf + l, "hash");
+    config_lookup_string (&conf, buf, (const char **)&bot_hash);
+    if (bot_hash) {
+      bot_hash = strdup (bot_hash);
+    }
+  }
   
   char *config_directory;
 
@@ -523,7 +537,6 @@ static void sighup_handler (const int sig) {
 char *set_user_name;
 char *set_group_name;
 int accept_any_tcp;
-char *bot_hash;
 
 int change_user_group () {
   char *username = set_user_name;
