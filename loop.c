@@ -503,7 +503,11 @@ void on_got_auth_state (void *TLS, void *extra, struct TdNullaryObject *res) {
 
 void tdcli_login (void) {
   auth_state = 0;
-  TdCClientSendCommand (TLS, (void *)TdCreateObjectGetAuthState (), on_got_auth_state, NULL);
+  if (!bot_mode || !bot_hash) {
+    TdCClientSendCommand (TLS, (void *)TdCreateObjectGetAuthState (), on_got_auth_state, NULL);
+  } else {
+    TdCClientSendCommand (TLS, (void *)TdCreateObjectCheckAuthBotToken (bot_hash), on_got_auth_state, NULL);
+  }
 }
 
 void wakeup (void *TLS) {  
