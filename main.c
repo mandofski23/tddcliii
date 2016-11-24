@@ -122,7 +122,7 @@ int port;
 int use_ids;
 int ipv6_enabled;
 char *start_command;
-int disable_link_preview;
+int disable_msg_preview;
 int enable_json;
 int alert_sound;
 int exit_code;
@@ -709,7 +709,7 @@ void args_parse (int argc, char **argv) {
       use_ids ++;
       break;
     case 1002:
-      disable_link_preview = 2;
+      disable_msg_preview = 2;
       break;
     case 1003:
       enable_json = 1;
