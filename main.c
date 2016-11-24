@@ -106,6 +106,7 @@ int bot_mode;
 int verbosity;
 int msg_num_mode;
 int log_level;
+int wait_dialog_list;
 
 char *config_filename;
 char *profile;
@@ -369,6 +370,11 @@ void parse_config (void) {
     }
   }
 
+  if (!wait_dialog_list) {
+    strcpy (buf + l, "wait_dialog_list");
+    config_lookup_bool (&conf, buf, &wait_dialog_list);
+  }
+
   if (!verbosity) {
     strcpy (buf + l, "verbosity");
     config_lookup_int (&conf, buf, &verbosity);
@@ -477,7 +483,6 @@ void usage (void) {
 
 int register_mode;
 int disable_auto_accept;
-int wait_dialog_list;
 
 int daemonize=0;
 

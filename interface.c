@@ -4646,9 +4646,9 @@ void logprintf (const char *format, ...) {
   va_end (ap);
 
   double T = (double)time (0);
-  mprint_start (notify_ev);
-  mprintf (notify_ev, " *** %.6lf %s\n", T, log_buf);
-  mprint_end (notify_ev);
+  //mprint_start (notify_ev);
+  fprintf (stderr, " *** %.6lf %s\n", T, log_buf);
+  //mprint_end (notify_ev);
 }
 
 int color_stack_pos;
