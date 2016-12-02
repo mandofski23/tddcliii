@@ -5,6 +5,7 @@ set (CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
 add_subdirectory("td/")
 include_directories ("td/")
 include_directories ("td/td/generate/")
+include_directories ("td/td/generate/default_td_api/")
 
 #find_package (libevent)
 find_package(LibConfig)
@@ -101,8 +102,26 @@ set (LIBTDEDIT_SOURCE
   libedit/readline.c 
 )
 
+set (TDCLI_CURSES_SOURCE
+  telegram-curses.cpp
+  td-window.cpp
+  td-curses-utils.cpp
+  td-window-input.cpp
+  td-window-root.cpp
+  td-window-log.cpp
+  td-window-dialogs.cpp
+  td-line-edit.cpp
+  td-window-chat.cpp
+)
+
+
 add_library (tdedit STATIC ${LIBTDEDIT_SOURCE})
 add_executable (telegram-cli ${TDCLI_SOURCE})
+add_executable (telegram-curses ${TDCLI_CURSES_SOURCE})
 target_link_libraries (telegram-cli tdc tdclient ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${EDIT_LIBS} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread )
+target_link_libraries (telegram-curses tdc tdclient ${OPENSSL_LIBRARIES}
+  ${ZLIB_LIBRARIES} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY}
+  ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread
+  -lpanel -lncursesw -ltermkey)
 install (TARGETS telegram-cli
     RUNTIME DESTINATION bin)

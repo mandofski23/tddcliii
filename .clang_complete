@@ -1,0 +1,7 @@
+-std=c++14
+-iquote td/
+-iquote td/tdactor/
+-iquote td/tdutils/
+-iquote td/td/generate/
+-iquote td/td/generate/default_td_api/
+-iquote .
