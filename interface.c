@@ -95,7 +95,7 @@
 
 struct pending_message {
   long long chat_id;
-  int id;
+  long long id;
   struct in_command *cmd;
 };
 
@@ -619,13 +619,13 @@ void on_chat_update (struct TdChat *C) {
 /* {{{ MESSAGE ALIASES */
 struct message_alias {
   int local_id;
-  int message_id;
+  long long message_id;
   long long chat_id;
 
   struct TdMessage *message;
 };
 #define message_alias_cmp_local(a,b) (a->local_id - b->local_id)
-#define message_alias_cmp_global(a,b) memcmp(&a->message_id, &b->message_id, 12)
+#define message_alias_cmp_global(a,b) memcmp(&a->message_id, &b->message_id, 16)
 DEFINE_TREE (message_alias_local, struct message_alias *, message_alias_cmp_local, NULL)
 DEFINE_TREE (message_alias_global, struct message_alias *, message_alias_cmp_global, NULL)
 
@@ -639,7 +639,7 @@ struct message_alias *convert_local_to_global (int local_id) {
   return tree_lookup_message_alias_local (message_local_tree, &M);
 }
 
-struct message_alias *convert_global_to_local (long long chat_id, int message_id) {
+struct message_alias *convert_global_to_local (long long chat_id, long long message_id) {
   struct message_alias M;
   M.chat_id = chat_id;
   M.message_id = message_id;
@@ -654,7 +654,7 @@ struct message_alias *convert_global_to_local (long long chat_id, int message_id
   return A;
 }
 
-struct TdMessage *get_message (long long chat_id, int message_id) {
+struct TdMessage *get_message (long long chat_id, long long message_id) {
   struct message_alias *A = convert_global_to_local (chat_id, message_id);
   return A->message;
 }
@@ -984,8 +984,8 @@ int hex2int (char c) {
 }
 
 char *print_permanent_msg_id (tdl_message_id_t id) {  
-  static char buf[2 * sizeof (tdl_message_id_t) + 1];
-  sprintf (buf, "%d", id.message_id);
+  static char buf[32];
+  sprintf (buf, "%lld", id.message_id);
   /* 
   unsigned char *s = (void *)&id;
   int i;
@@ -1671,13 +1671,13 @@ void do_load_file (struct command *command, int arg_num, struct arg args[], stru
 
 void do_msg (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id;
-  int reply_id;
+  long long reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;
     reply_id = args[2].msg_id.message_id;
   } else {
     chat_id = args[2].chat_id;
-    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
+    reply_id = find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
   char *text = args[3].str;
@@ -1742,13 +1742,13 @@ void do_compose (struct command *command, int arg_num, struct arg args[], struct
 
 void do_send_file (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id;
-  int reply_id;
+  long long reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;    
     reply_id = args[2].msg_id.message_id;
   } else {
     chat_id = args[2].chat_id;
-    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
+    reply_id = (long long)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
   char *media_type = args[3].str;
@@ -1765,11 +1765,11 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
     } else if (!strcmp (media_type, "document")) {
       content = (void *)TdCreateObjectInputMessageDocument ((void *)TdCreateObjectInputFileLocal (file_name), NULL, caption);
     } else if (!strcmp (media_type, "photo")) {
-      content = (void *)TdCreateObjectInputMessagePhoto ((void *)TdCreateObjectInputFileLocal (file_name), 0, 0, caption);
+      content = (void *)TdCreateObjectInputMessagePhoto ((void *)TdCreateObjectInputFileLocal (file_name), NULL, (void *)TdCreateObjectVectorInt (0, NULL), 0, 0, caption);
     } else if (!strcmp (media_type, "sticker")) {
       content = (void *)TdCreateObjectInputMessageSticker ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0);
     } else if (!strcmp (media_type, "video")) {
-      content = (void *)TdCreateObjectInputMessageVideo ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0, 0, caption);
+      content = (void *)TdCreateObjectInputMessageVideo ((void *)TdCreateObjectInputFileLocal (file_name), NULL, (void *)TdCreateObjectVectorInt (0, NULL), 0, 0, 0, caption);
     } else if (!strcmp (media_type, "voice")) {
       content = (void *)TdCreateObjectInputMessageVoice ((void *)TdCreateObjectInputFileLocal (file_name), 0, TdCreateObjectBytes (NULL, 0), caption);
     } else {
@@ -1785,13 +1785,13 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
 
 void do_send_location (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id;
-  int reply_id;
+  long long reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;
     reply_id = args[2].msg_id.message_id;
   } else {
     chat_id = args[2].chat_id;
-    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
+    reply_id = find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
   double latitude = args[3].dval;
@@ -1803,13 +1803,13 @@ void do_send_location (struct command *command, int arg_num, struct arg args[], 
 
 void do_send_contact (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id;
-  int reply_id;
+  long long reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;    
     reply_id = args[2].msg_id.message_id;
   } else {
     chat_id = args[2].chat_id;
-    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
+    reply_id = find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
   char *phone = args[3].str;
@@ -1822,17 +1822,17 @@ void do_send_contact (struct command *command, int arg_num, struct arg args[], s
 
 void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id;
-  int reply_id;
+  long long reply_id;
   if (command->params[0]) {
     chat_id = args[2].msg_id.chat_id;
     reply_id = args[2].msg_id.message_id;
   } else {
     chat_id = args[2].chat_id;
-    reply_id = (int)find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
+    reply_id = find_modifier (args[0].vec_len, args[0].vec, "reply_id", 2);
   }
 
   long long from_chat_id = args[3].msg_id.chat_id;
-  int msg_id = args[3].msg_id.message_id;
+  long long msg_id = args[3].msg_id.message_id;
   
   struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageForwarded (from_chat_id, msg_id);
   TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
@@ -2123,7 +2123,7 @@ void do_channel_edit (struct command *command, int arg_num, struct arg args[], s
 
 void do_pin_message (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id = args[2].msg_id.chat_id;
-  int msg_id = args[2].msg_id.message_id;
+  long long msg_id = args[2].msg_id.message_id;
  
   struct tdcli_peer *P = get_peer (chat_id);
 
@@ -2174,8 +2174,8 @@ void do_contact_delete (struct command *command, int arg_num, struct arg args[],
 
 void do_mark_read (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id = args[2].chat_id;
-  int id = 0;
-  struct TdVectorInt *av = TdCreateObjectVectorInt (1, &id);
+  long long id = 0;
+  struct TdVectorLong *av = TdCreateObjectVectorLong (1, &id);
   TdCClientSendCommand(TLS, (void *)TdCreateObjectViewMessages (chat_id, av), tdcli_cb, cmd);  
 }
 
@@ -2185,7 +2185,7 @@ struct chat_history_extra {
   int current_pos;
   int current_offset;
   int limit;
-  int last_msg_id;
+  long long last_msg_id;
   long long chat_id;
   struct TdMessage **list;
 };
@@ -2233,8 +2233,8 @@ void received_chat_history_slice (void *TLS, void *extra, struct TdNullaryObject
     tdcli_cb (TLS, e->cmd, (struct TdNullaryObject *)msgs_vec);
     
     if (e->current_pos > 0) {
-      int id = e->list[0]->id_;
-      struct TdVectorInt *av = TdCreateObjectVectorInt (1, &id);
+      long long id = e->list[0]->id_;
+      struct TdVectorLong *av = TdCreateObjectVectorLong (1, &id);
       TdCClientSendCommand(TLS, (void *)TdCreateObjectViewMessages (e->chat_id, av), tdcli_cb, NULL);  
     }
 
@@ -2329,15 +2329,15 @@ void do_search (struct command *command, int arg_num, struct arg args[], struct 
 
 void do_delete_msg (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id = args[2].msg_id.chat_id;
-  int msg_id = args[2].msg_id.message_id;
+  long long msg_id = args[2].msg_id.message_id;
 
-  struct TdVectorInt *vec = TdCreateObjectVectorInt (1, &msg_id);
+  struct TdVectorLong *vec = TdCreateObjectVectorLong (1, &msg_id);
   TdCClientSendCommand(TLS, (void *)TdCreateObjectDeleteMessages (chat_id, vec), tdcli_cb, cmd);  
 }
 
 void do_get_message (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
   long long chat_id = args[2].msg_id.chat_id;
-  int msg_id = args[2].msg_id.message_id;
+  long long msg_id = args[2].msg_id.message_id;
 
   TdCClientSendCommand(TLS, (void *)TdCreateObjectGetMessage (chat_id, msg_id), tdcli_cb, cmd);  
 }
@@ -3059,8 +3059,6 @@ void print_chat_gw (struct in_command *cmd, struct TdNullaryObject *res) {
   print_chat_name (cmd->ev, C, C->id_);
   mprintf (cmd->ev, "\n");
   mprint_end (cmd->ev);
-
-  in_command_decref (cmd);
 }
 
 void print_user_gw (struct in_command *cmd, struct TdNullaryObject *res) {
@@ -3531,7 +3529,6 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
       
       if (P) {
         print_success (P->cmd);
-        logprintf ("refcnt = %d\n", P->cmd->refcnt);
         in_command_decref (P->cmd);
         pending_messages = tree_delete_pending_message (pending_messages, P);
         free (P);
@@ -3663,8 +3660,6 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
     break;
   case CODE_UpdateOption:
     break;
-  case CODE_UpdateStickers:
-    break;
   case CODE_UpdateSavedAnimations:
     break;
   case CODE_UpdateNewInlineQuery:
@@ -3688,6 +3683,20 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
     }
     break;
   case CODE_UpdatePrivacy:
+    break;
+  case CODE_UpdateFileGenerationStart:
+    break;
+  case CODE_UpdateFileGenerationProgress:
+    break;
+  case CODE_UpdateFileGenerationFinish:
+    break;
+  case CODE_UpdateRecentStickers:
+    break;
+  case CODE_UpdateTrendingStickerSets:
+    break;
+  case CODE_UpdateStickerSets:
+    break;
+  case CODE_UpdateAuthState:
     break;
   }
 }
@@ -3984,8 +3993,6 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
       }
     }
     break;
-  case CODE_UpdateStickers:
-    break;
   case CODE_UpdateSavedAnimations:
     break;
   case CODE_UpdateNewInlineQuery:
@@ -3999,6 +4006,20 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateServiceNotification:
     break;
   case CODE_UpdatePrivacy:
+    break;
+  case CODE_UpdateFileGenerationStart:
+    break;
+  case CODE_UpdateFileGenerationProgress:
+    break;
+  case CODE_UpdateFileGenerationFinish:
+    break;
+  case CODE_UpdateRecentStickers:
+    break;
+  case CODE_UpdateTrendingStickerSets:
+    break;
+  case CODE_UpdateStickerSets:
+    break;
+  case CODE_UpdateAuthState:
     break;
   /*default:
     {
@@ -5428,6 +5449,14 @@ void print_message_game_score (struct in_ev *ev, struct TdMessageGameScore *act)
   mprintf (ev, "scored %d points in game %lld", act->score_, act->game_id_);
 }
 
+void print_message_screenshot_taken (struct in_ev *ev, struct TdMessageScreenshotTaken *act) {
+  mprintf (ev, "taken screenshot");
+}
+
+void print_message_chat_set_ttl (struct in_ev *ev, struct TdMessageChatSetTtl *act) {
+  mprintf (ev, "set ttl to %d", act->ttl_);
+}
+
 void print_message_unsupported (struct in_ev *ev, struct TdMessageUnsupported *act) {
   mprintf (ev, "[unsupported]");
 }
@@ -5482,6 +5511,10 @@ void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMess
     return print_message_pin_message (ev, chat, (void *)content);
   case CODE_MessageGameScore:
     return print_message_game_score (ev, (void *)content);
+  case CODE_MessageScreenshotTaken:
+    return print_message_screenshot_taken (ev, (void *)content);
+  case CODE_MessageChatSetTtl:
+    return print_message_chat_set_ttl (ev, (void *)content);
   case CODE_MessageUnsupported:
     return print_message_unsupported (ev, (void *)content);
   /*default:
@@ -5494,9 +5527,9 @@ void print_message_content (struct in_ev *ev, struct TdChat *chat, struct TdMess
 }
 
 
-void print_message_id (struct in_ev *ev, struct TdChat *C, int id) {
+void print_message_id (struct in_ev *ev, struct TdChat *C, long long id) {
   if (permanent_msg_id_mode) {
-    mprintf (ev, "%d", id);
+    mprintf (ev, "%lld", id);
   } else {
     mprintf (ev, "%d", convert_global_to_local (C->id_, id)->local_id);
   }
