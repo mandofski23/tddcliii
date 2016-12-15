@@ -174,11 +174,7 @@ unsigned char *tdcb_lua_get_bytes (int *len) {
 }
 
 long long tdcb_lua_get_long (void) {
-  if (lua_isnumber (luaState, -1)) {
-    return lua_tointeger (luaState, -1);
-  } else {
-    return atoll (lua_tostring (luaState, -1));
-  }
+  return atoll (lua_tostring (luaState, -1));
 }
 
 double tdcb_lua_get_double (void) {
