@@ -3,7 +3,7 @@
 #pragma pack(push,4)
 struct tdl_message_id {
   long long chat_id;
-  int message_id;
+  long long message_id;
 };
 
 struct tgl_peer_id {
