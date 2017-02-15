@@ -1663,7 +1663,7 @@ void do_load_file (struct command *command, int arg_num, struct arg args[], stru
   } else {
     F->last_cb = F->first_cb = cb;
 
-    TdCClientSendCommand(TLS, (void *)TdCreateObjectDownloadFile (id), try_download_cb, F);
+    TdCClientSendCommand(TLS, (void *)TdCreateObjectDownloadFile (id, 1), try_download_cb, F);
   }
 }
 
@@ -1759,7 +1759,7 @@ void do_send_file (struct command *command, int arg_num, struct arg args[], stru
   struct TdInputMessageContent *content = NULL;
   if (media_type && strlen (media_type)) {
     if (!strcmp (media_type, "animation")) {
-      content = (void *)TdCreateObjectInputMessageAnimation ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0, caption);
+      content = (void *)TdCreateObjectInputMessageAnimation ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, 0, 0, caption);
     } else if (!strcmp (media_type, "audio")) {
       content = (void *)TdCreateObjectInputMessageAudio ((void *)TdCreateObjectInputFileLocal (file_name), NULL, 0, NULL, NULL, caption);
     } else if (!strcmp (media_type, "document")) {
@@ -1834,7 +1834,7 @@ void do_fwd (struct command *command, int arg_num, struct arg args[], struct in_
   long long from_chat_id = args[3].msg_id.chat_id;
   long long msg_id = args[3].msg_id.message_id;
   
-  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageForwarded (from_chat_id, msg_id);
+  struct TdInputMessageContent *content = (void *)TdCreateObjectInputMessageForwarded (from_chat_id, msg_id, 0);
   TdCClientSendCommand(TLS, (void *)TdCreateObjectSendMessage (chat_id, reply_id, 0, 0, NULL, content), tdcli_cb, cmd);
 }
 
@@ -2332,7 +2332,7 @@ void do_delete_msg (struct command *command, int arg_num, struct arg args[], str
   long long msg_id = args[2].msg_id.message_id;
 
   struct TdVectorLong *vec = TdCreateObjectVectorLong (1, &msg_id);
-  TdCClientSendCommand(TLS, (void *)TdCreateObjectDeleteMessages (chat_id, vec), tdcli_cb, cmd);  
+  TdCClientSendCommand(TLS, (void *)TdCreateObjectDeleteMessages (chat_id, vec, 0), tdcli_cb, cmd);  
 }
 
 void do_get_message (struct command *command, int arg_num, struct arg args[], struct in_command *cmd) {
@@ -3539,8 +3539,8 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
     {
       struct TdUpdateMessageSendFailed *U = (void *)Upd;
       struct pending_message Q;
-      Q.chat_id = U->chat_id_;
-      Q.id = U->message_id_; 
+      Q.chat_id = U->message_->chat_id_;
+      Q.id = U->old_message_id_; 
       struct pending_message *P = tree_lookup_pending_message (pending_messages, &Q);
 
       if (P) {
@@ -3697,6 +3697,16 @@ void default_update_handler (void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateStickerSets:
     break;
   case CODE_UpdateAuthState:
+    break;
+  case CODE_UpdateMessageSendAcknowledged:
+    break;
+  case CODE_UpdateChatIsPinned:
+    break;
+  case CODE_UpdateOpenMessageContent:
+    break;
+  case CODE_UpdateNewCustomQuery:
+    break;
+  case CODE_UpdateNewCustomEvent:
     break;
   }
 }
@@ -4020,6 +4030,16 @@ void updates_handler (void *TLS, void *arg, struct TdUpdate *Upd) {
   case CODE_UpdateStickerSets:
     break;
   case CODE_UpdateAuthState:
+    break;
+  case CODE_UpdateMessageSendAcknowledged:
+    break;
+  case CODE_UpdateChatIsPinned:
+    break;
+  case CODE_UpdateOpenMessageContent:
+    break;
+  case CODE_UpdateNewCustomQuery:
+    break;
+  case CODE_UpdateNewCustomEvent:
     break;
   /*default:
     {
