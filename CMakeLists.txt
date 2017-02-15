@@ -117,11 +117,11 @@ set (TDCLI_CURSES_SOURCE
 
 add_library (tdedit STATIC ${LIBTDEDIT_SOURCE})
 add_executable (telegram-cli ${TDCLI_SOURCE})
-add_executable (telegram-curses ${TDCLI_CURSES_SOURCE})
+#add_executable (telegram-curses ${TDCLI_CURSES_SOURCE})
 target_link_libraries (telegram-cli tdc tdclient ${OPENSSL_LIBRARIES} ${ZLIB_LIBRARIES} ${EDIT_LIBS} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY} ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread )
-target_link_libraries (telegram-curses tdc tdclient ${OPENSSL_LIBRARIES}
-  ${ZLIB_LIBRARIES} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY}
-  ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread
-  -lpanel -lncursesw -ltermkey)
+#target_link_libraries (telegram-curses tdc tdclient ${OPENSSL_LIBRARIES}
+#  ${ZLIB_LIBRARIES} ${LIBCONFIG_LIBRARY} ${LIBEVENT2_LIBRARY}
+#  ${LIBEVENT1_LIBRARY} ${LIBJANSSON_LIBRARY} ${LUA_LIBRARIES} -lpthread
+#  -lpanel -lncursesw -ltermkey)
 install (TARGETS telegram-cli
     RUNTIME DESTINATION bin)
